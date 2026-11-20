@@ -1,0 +1,122 @@
+package main
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	// TODO: Uncomment the code below to pass the first stage!
+	// "sort"
+)
+
+// tensor is one table of numbers from a safetensors file.
+type tensor struct {
+	DType  string
+	Shape  []int
+	Values []float32
+}
+
+// loadTensors reads every tensor in a safetensors file, with all of its numbers.
+func loadTensors(path string) (map[string]tensor, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var headerLen uint64
+	if err := binary.Read(f, binary.LittleEndian, &headerLen); err != nil {
+		return nil, err
+	}
+	headerBytes := make([]byte, headerLen)
+	if _, err := io.ReadFull(f, headerBytes); err != nil {
+		return nil, err
+	}
+	var header map[string]struct {
+		DType       string `json:"dtype"`
+		Shape       []int  `json:"shape"`
+		DataOffsets [2]int `json:"data_offsets"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	tensors := make(map[string]tensor)
+	for name, info := range header {
+		if name == "__metadata__" {
+			continue
+		}
+		raw := data[info.DataOffsets[0]:info.DataOffsets[1]]
+		values := make([]float32, len(raw)/4)
+		for i := range values {
+			bits := binary.LittleEndian.Uint32(raw[i*4:])
+			switch info.DType {
+			case "F32":
+				values[i] = math.Float32frombits(bits)
+			case "I32":
+				values[i] = float32(int32(bits))
+			default:
+				return nil, fmt.Errorf("unsupported dtype %s", info.DType)
+			}
+		}
+		tensors[name] = tensor{DType: info.DType, Shape: info.Shape, Values: values}
+	}
+	return tensors, nil
+}
+
+// Usage: your_program.sh <command> <arg1> <arg2> ...
+func main() {
+	// You can use print statements as follows for debugging, they'll be visible when running tests.
+	fmt.Fprintf(os.Stderr, "Logs from your program will appear here!\n")
+
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "usage: your_program.sh <command> [<args>...]\n")
+		os.Exit(1)
+	}
+
+	switch command := os.Args[1]; command {
+	case "inspect":
+		// TODO: Uncomment the code below to pass the first stage!
+		//
+		// tensors, err := loadTensors(os.Args[2])
+		// if err != nil {
+		// 	fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
+		// 	os.Exit(1)
+		// }
+		//
+		// names := make([]string, 0, len(tensors))
+		// for name := range tensors {
+		// 	names = append(names, name)
+		// }
+		// sort.Strings(names)
+		//
+		// type summary struct {
+		// 	Name  string    `json:"name"`
+		// 	DType string    `json:"dtype"`
+		// 	Shape []int     `json:"shape"`
+		// 	First []float32 `json:"first"`
+		// }
+		// summaries := make([]summary, 0, len(names))
+		// for _, name := range names {
+		// 	t := tensors[name]
+		// 	first := t.Values[:min(4, len(t.Values))]
+		// 	summaries = append(summaries, summary{name, t.DType, t.Shape, first})
+		// }
+		// encoded, err := json.Marshal(summaries)
+		// if err != nil {
+		// 	fmt.Fprintf(os.Stderr, "Error encoding output: %s\n", err)
+		// 	os.Exit(1)
+		// }
+		// fmt.Println(string(encoded))
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
+		os.Exit(1)
+	}
+}
