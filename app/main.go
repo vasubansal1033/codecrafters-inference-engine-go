@@ -7,8 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
-	// TODO: Uncomment the code below to pass the first stage!
-	// "sort"
+	"sort"
 )
 
 // tensor is one table of numbers from a safetensors file.
@@ -73,7 +72,7 @@ func loadTensors(path string) (map[string]tensor, error) {
 // Usage: your_program.sh <command> <arg1> <arg2> ...
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Fprintf(os.Stderr, "Logs from your program will appear here!\n")
+	// fmt.Fprintf(os.Stderr, "Logs from your program will appear here!\n")
 
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: your_program.sh <command> [<args>...]\n")
@@ -82,38 +81,36 @@ func main() {
 
 	switch command := os.Args[1]; command {
 	case "inspect":
-		// TODO: Uncomment the code below to pass the first stage!
-		//
-		// tensors, err := loadTensors(os.Args[2])
-		// if err != nil {
-		// 	fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
-		// 	os.Exit(1)
-		// }
-		//
-		// names := make([]string, 0, len(tensors))
-		// for name := range tensors {
-		// 	names = append(names, name)
-		// }
-		// sort.Strings(names)
-		//
-		// type summary struct {
-		// 	Name  string    `json:"name"`
-		// 	DType string    `json:"dtype"`
-		// 	Shape []int     `json:"shape"`
-		// 	First []float32 `json:"first"`
-		// }
-		// summaries := make([]summary, 0, len(names))
-		// for _, name := range names {
-		// 	t := tensors[name]
-		// 	first := t.Values[:min(4, len(t.Values))]
-		// 	summaries = append(summaries, summary{name, t.DType, t.Shape, first})
-		// }
-		// encoded, err := json.Marshal(summaries)
-		// if err != nil {
-		// 	fmt.Fprintf(os.Stderr, "Error encoding output: %s\n", err)
-		// 	os.Exit(1)
-		// }
-		// fmt.Println(string(encoded))
+		tensors, err := loadTensors(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
+			os.Exit(1)
+		}
+
+		names := make([]string, 0, len(tensors))
+		for name := range tensors {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		type summary struct {
+			Name  string    `json:"name"`
+			DType string    `json:"dtype"`
+			Shape []int     `json:"shape"`
+			First []float32 `json:"first"`
+		}
+		summaries := make([]summary, 0, len(names))
+		for _, name := range names {
+			t := tensors[name]
+			first := t.Values[:min(4, len(t.Values))]
+			summaries = append(summaries, summary{name, t.DType, t.Shape, first})
+		}
+		encoded, err := json.Marshal(summaries)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding output: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(encoded))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
