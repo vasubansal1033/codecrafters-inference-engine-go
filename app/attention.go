@@ -141,6 +141,11 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 	if err != nil {
 		return nil, err
 	}
+	err = applyCausalMask(score)
+	if err != nil {
+		return nil, err
+	}
+
 	fmt.Printf("score shape: %v\n", score.Shape)
 
 	return nil, nil
@@ -177,4 +182,24 @@ func calculateScore(t tensor, n_pos int, n_embd int) (tensor, error) {
 	// Dot is over key_dim= n_embd
 	dK := float32(n_embd)
 	return qk.scalerMultiply(1 / float32(math.Sqrt(float64(dK))))
+}
+
+func applyCausalMask(t tensor) error {
+	minf := math.Inf(-1)
+	tshape := t.Shape
+	rows, cols := tshape[0], tshape[1]
+
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			if j > i {
+				flatIdx, err := t.getFlatArrayIdx(i, j)
+				if err != nil {
+					return err
+				}
+				t.Values[flatIdx] = float32(minf)
+			}
+		}
+	}
+
+	return nil
 }
