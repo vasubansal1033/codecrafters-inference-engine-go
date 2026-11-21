@@ -102,5 +102,28 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 	fmt.Printf("projection bias: %v\n", layerProjBias.Shape)       // [768]
 
 	fmt.Printf("Input tensor: %+v\n", inputTensor)
+
+	/*
+		TENSOR CALCULATION:
+		input_rows * c_attn.weight + c_attn.bias
+			(num_pos, n_embd)*(n_embd, 3 * n_embd) + [3 * n_embd]
+			bias will be broadcasted horizontally
+		output -> (num_pos, 3 * n_embd) -> (num_pos, [n_embd | n_embd | n_embd])
+														Q        K         V
+		Each row corresponding to a position is divided into [Q, K, V]
+		Q, K, V -> each has (n_pos, n_embd)
+		attn score: QK' / sqrt(d_k) -> (n_pos, n_pos)
+
+		mask(score) -> upper triangular replaced with -inf
+		softmax(mask(score)) * V
+		(num_pos, num_pos) * (num_pos, n_embd) -> (num_pos, n_embd)
+
+		result = causally attended embeddings (dim is same as input embeddings)
+			   = (num_pod, n_embd)
+
+		result = result * c_proj.weight + c_proj.bias
+			(num_pos, n_embd) * (n_embd, n_embd) + [n_embd]
+			= (num_pos, n_embd)
+	*/
 	return nil, nil
 }
