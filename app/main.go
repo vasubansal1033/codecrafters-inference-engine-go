@@ -116,6 +116,10 @@ func main() {
 			layerNum,
 			inputTensor,
 		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while calculating attention: %s\n", err)
+			os.Exit(1)
+		}
 
 		fmt.Printf("%v", attn)
 

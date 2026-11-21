@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 )
 
@@ -125,5 +126,55 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 			(num_pos, n_embd) * (n_embd, n_embd) + [n_embd]
 			= (num_pos, n_embd)
 	*/
+
+	mul, err := inputTensor.multiply(layerAttnWeights)
+	if err != nil {
+		return nil, err
+	}
+
+	add, err := mul.add(layerAttnBias)
+	if err != nil {
+		return nil, err
+	}
+
+	score, err := calculateScore(add, inputTensor.Shape[0], config.NumberOfEmbeddings)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("score shape: %v\n", score.Shape)
+
 	return nil, nil
+}
+
+// splits [Q | K | V] and returns Q K^T / sqrt(d_k).
+func calculateScore(t tensor, n_pos int, n_embd int) (tensor, error) {
+	tshape := t.Shape
+	if len(tshape) != 2 || n_pos < 0 || n_embd <= 0 || tshape[0] != n_pos || tshape[1] != 3*n_embd || len(t.Values) < n_pos*3*n_embd {
+		return tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d and n_embd: %d", tshape, n_pos, n_embd)
+	}
+
+	q := tensor{DType: t.DType,
+		Shape:  []int{n_pos, n_embd},
+		Values: make([]float32, n_pos*n_embd),
+	}
+	k := tensor{DType: t.DType, Shape: []int{n_pos, n_embd}, Values: make([]float32, n_pos*n_embd)}
+
+	stride := 3 * n_embd
+	for i := 0; i < n_pos; i++ {
+		row := t.Values[i*stride : (i+1)*stride]
+		copy(q.Values[i*n_embd:(i+1)*n_embd], row[:n_embd])
+		copy(k.Values[i*n_embd:(i+1)*n_embd], row[n_embd:2*n_embd])
+	}
+
+	kT, err := k.transpose()
+	if err != nil {
+		return tensor{}, err
+	}
+	qk, err := q.multiply(kT)
+	if err != nil {
+		return tensor{}, err
+	}
+	// Dot is over key_dim= n_embd
+	dK := float32(n_embd)
+	return qk.scalerMultiply(1 / float32(math.Sqrt(float64(dK))))
 }
