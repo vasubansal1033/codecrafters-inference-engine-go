@@ -19,6 +19,66 @@ type tensor struct {
 	Values []float32
 }
 
+func (t1 *tensor) multiply(t2 tensor) (tensor, error) {
+	t1Shape, t2Shape := t1.Shape, t2.Shape
+	// mxn times nxp -> mxp
+	if t1Shape[1] != t2Shape[0] {
+		return tensor{}, fmt.Errorf("Multiplication error: invalid shapes %v x %v", t1Shape, t2Shape)
+	}
+
+	resRows, resCols := t1Shape[0], t2Shape[1]
+	res := tensor{
+		DType:  t1.DType, // assuming both have same DType,
+		Shape:  []int{resRows, resCols},
+		Values: make([]float32, resRows*resCols),
+	}
+
+	/*
+		res[i][j] = sum over k t1[i][k].t2[k][j]
+	*/
+	commonDim := t1Shape[1]
+	for i := 0; i < resRows; i++ {
+		for j := 0; j < resCols; j++ {
+			flatIdx, err := res.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
+			}
+
+			for k := 0; k < commonDim; k++ {
+				t1FlatIdx, err := t1.getFlatArrayIdx(i, k)
+				if err != nil {
+					return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
+				}
+				t2FlatIdx, err := t2.getFlatArrayIdx(k, j)
+				if err != nil {
+					return tensor{}, fmt.Errorf("Multiplication error[3]: invalid shapes %v x %v", t1Shape, t2Shape)
+				}
+
+				res.Values[flatIdx] += t1.Values[t1FlatIdx] * t2.Values[t2FlatIdx]
+			}
+		}
+	}
+
+	return res, nil
+}
+
+func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
+	/*
+		2, 3
+		0(0, 0) 1(0, 1) 2(0, 2)
+		3(1, 0) 4(1, 1) 5(1, 2)
+		6(2, 0) 7(2, 1) 8(2, 2)
+
+	*/
+	cols := t.Shape[1]
+	idx := i*cols + j
+	if idx >= len(t.Values) {
+		return -1, fmt.Errorf("Invalid indices: %d %d for shape %v", i, j, t.Shape)
+	}
+
+	return idx, nil
+}
+
 // loadTensors reads every tensor in a safetensors file, with all of its numbers.
 func loadTensors(path string) (map[string]tensor, error) {
 	f, err := os.Open(path)
@@ -248,6 +308,23 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 	fmt.Printf("attention bias: %v\n", layerAttnBias.Shape)        // [2304]
 	fmt.Printf("projection weights: %v\n", layerProjWeights.Shape) // [768, 768]
 	fmt.Printf("projection bias: %v\n", layerProjBias.Shape)       // [768]
+
+	t1 := tensor{
+		DType:  "float32",
+		Shape:  []int{1, 2},
+		Values: []float32{1.0, 2.0},
+	}
+	t2 := tensor{
+		DType:  "float32",
+		Shape:  []int{2, 2},
+		Values: []float32{3.0, 4.0, 5.0, 6.0},
+	}
+
+	res, err := t1.multiply(t2)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Multiplication error: %s\n", err)
+	}
+	fmt.Printf("Mult result: %+v\n", res)
 
 	return nil, nil
 }
