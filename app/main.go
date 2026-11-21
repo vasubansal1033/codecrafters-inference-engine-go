@@ -121,7 +121,12 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("%v", attn)
+		attnJson, err := json.Marshal(attn)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding attn output: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(attnJson))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)

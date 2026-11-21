@@ -265,3 +265,12 @@ func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
 
 	return idx, nil
 }
+
+func (t *tensor) get2DArray() [][]float32 {
+	res := make([][]float32, t.Shape[0])
+	for i := 0; i < t.Shape[0]; i++ {
+		res[i] = t.Values[i*t.Shape[1] : (i+1)*t.Shape[1]]
+	}
+
+	return res
+}

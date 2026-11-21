@@ -90,19 +90,19 @@ func loadInputRows(path string) (tensor, error) {
 func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) ([][]float32, error) {
 	// fmt.Printf("config: %v\nlayer_num: %d\ninputs: %v", config, layer_num, inputs)
 
-	layerAttnWeights := tmap["h.0.attn.c_attn.weight"]
-	layerAttnBias := tmap["h.0.attn.c_attn.bias"]
-	layerProjWeights := tmap["h.0.attn.c_proj.weight"]
-	layerProjBias := tmap["h.0.attn.c_proj.bias"]
+	layerAttnWeights := tmap[fmt.Sprintf("h.%d.attn.c_attn.weight", layer_num)]
+	layerAttnBias := tmap[fmt.Sprintf("h.%d.attn.c_attn.bias", layer_num)]
+	layerProjWeights := tmap[fmt.Sprintf("h.%d.attn.c_proj.weight", layer_num)]
+	layerProjBias := tmap[fmt.Sprintf("h.%d.attn.c_proj.bias", layer_num)]
 
-	fmt.Println("Shapes:")
-	fmt.Printf("n_embd: %d\n", config.NumberOfEmbeddings)          // 768
-	fmt.Printf("attention weights: %v\n", layerAttnWeights.Shape)  // [768, 2304]
-	fmt.Printf("attention bias: %v\n", layerAttnBias.Shape)        // [2304]
-	fmt.Printf("projection weights: %v\n", layerProjWeights.Shape) // [768, 768]
-	fmt.Printf("projection bias: %v\n", layerProjBias.Shape)       // [768]
+	// fmt.Println("Shapes:")
+	// fmt.Printf("n_embd: %d\n", config.NumberOfEmbeddings)          // 768
+	// fmt.Printf("attention weights: %v\n", layerAttnWeights.Shape)  // [768, 2304]
+	// fmt.Printf("attention bias: %v\n", layerAttnBias.Shape)        // [2304]
+	// fmt.Printf("projection weights: %v\n", layerProjWeights.Shape) // [768, 768]
+	// fmt.Printf("projection bias: %v\n", layerProjBias.Shape)       // [768]
 
-	fmt.Printf("Input tensor: %+v\n", inputTensor)
+	// fmt.Printf("Input tensor: %+v\n", inputTensor)
 
 	/*
 		TENSOR CALCULATION:
@@ -137,7 +137,7 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 		return nil, err
 	}
 
-	score, err := calculateScore(add, inputTensor.Shape[0], config.NumberOfEmbeddings)
+	score, V, err := calculateScore(add, inputTensor.Shape[0], config.NumberOfEmbeddings)
 	if err != nil {
 		return nil, err
 	}
@@ -146,42 +146,75 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 		return nil, err
 	}
 
-	fmt.Printf("score shape: %v\n", score.Shape)
-
-	return nil, nil
-}
-
-// splits [Q | K | V] and returns Q K^T / sqrt(d_k).
-func calculateScore(t tensor, n_pos int, n_embd int) (tensor, error) {
-	tshape := t.Shape
-	if len(tshape) != 2 || n_pos < 0 || n_embd <= 0 || tshape[0] != n_pos || tshape[1] != 3*n_embd || len(t.Values) < n_pos*3*n_embd {
-		return tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d and n_embd: %d", tshape, n_pos, n_embd)
+	softmaxScore, err := score.softmax(1, 1)
+	if err != nil {
+		return nil, err
 	}
 
-	q := tensor{DType: t.DType,
+	// causally attended embeddings
+	weightedScore, err := softmaxScore.multiply(V)
+	if err != nil {
+		return nil, err
+	}
+
+	mul, err = weightedScore.multiply(layerProjWeights)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := mul.add(layerProjBias)
+	if err != nil {
+		return nil, err
+	}
+
+	// fmt.Printf("score shape: %v\n", res.Shape)
+
+	return res.get2DArray(), nil
+}
+
+// splits [Q | K | V] and returns Q K^T / sqrt(d_k) and V
+func calculateScore(t tensor, n_pos int, n_embd int) (tensor, tensor, error) {
+	tshape := t.Shape
+	if len(tshape) != 2 || n_pos < 0 || n_embd <= 0 || tshape[0] != n_pos || tshape[1] != 3*n_embd || len(t.Values) < n_pos*3*n_embd {
+		return tensor{}, tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d and n_embd: %d", tshape, n_pos, n_embd)
+	}
+
+	q := tensor{
+		DType:  t.DType,
 		Shape:  []int{n_pos, n_embd},
 		Values: make([]float32, n_pos*n_embd),
 	}
-	k := tensor{DType: t.DType, Shape: []int{n_pos, n_embd}, Values: make([]float32, n_pos*n_embd)}
+	k := tensor{
+		DType:  t.DType,
+		Shape:  []int{n_pos, n_embd},
+		Values: make([]float32, n_pos*n_embd),
+	}
+	v := tensor{
+		DType:  t.DType,
+		Shape:  []int{n_pos, n_embd},
+		Values: make([]float32, n_pos*n_embd),
+	}
 
 	stride := 3 * n_embd
 	for i := 0; i < n_pos; i++ {
 		row := t.Values[i*stride : (i+1)*stride]
 		copy(q.Values[i*n_embd:(i+1)*n_embd], row[:n_embd])
 		copy(k.Values[i*n_embd:(i+1)*n_embd], row[n_embd:2*n_embd])
+		copy(v.Values[i*n_embd:(i+1)*n_embd], row[2*n_embd:3*n_embd])
 	}
 
 	kT, err := k.transpose()
 	if err != nil {
-		return tensor{}, err
+		return tensor{}, tensor{}, err
 	}
 	qk, err := q.multiply(kT)
 	if err != nil {
-		return tensor{}, err
+		return tensor{}, tensor{}, err
 	}
 	// Dot is over key_dim= n_embd
 	dK := float32(n_embd)
-	return qk.scalerMultiply(1 / float32(math.Sqrt(float64(dK))))
+	res, err := qk.scalerMultiply(1 / float32(math.Sqrt(float64(dK))))
+	return res, v, err
 }
 
 func applyCausalMask(t tensor) error {
