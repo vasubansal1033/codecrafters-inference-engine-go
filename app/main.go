@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 )
@@ -19,6 +20,7 @@ type tensor struct {
 	Values []float32
 }
 
+// TODO[improvement]: current implementations work only for 2D tensors
 func (t1 tensor) add(t2 tensor) (tensor, error) {
 	t1Shape, t2Shape := t1.Shape, t2.Shape
 	if (t1Shape[0] != t2Shape[0]) || (t1Shape[1] != t2Shape[1]) {
@@ -53,6 +55,22 @@ func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
 			}
 
 			t1.Values[t1FlatIdx] *= n
+		}
+	}
+
+	return t1, nil
+}
+
+func (t1 tensor) exp(n float32) (tensor, error) {
+	t1Shape := t1.Shape
+	for i := 0; i < t1Shape[0]; i++ {
+		for j := 0; j < t1Shape[1]; j++ {
+			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Scale error[1]: invalid shapes %v", t1Shape)
+			}
+
+			t1.Values[t1FlatIdx] = float32(math.Exp(float64(t1.Values[t1FlatIdx])))
 		}
 	}
 
@@ -100,6 +118,47 @@ func (t1 *tensor) multiply(t2 tensor) (tensor, error) {
 	}
 
 	return res, nil
+}
+
+func (t tensor) softmax(dim int, temp float32) (tensor, error) {
+	if dim >= len(t.Shape) {
+		return tensor{}, fmt.Errorf("Softmax error: Invalid dimension %d passed for shape %v", dim, t.Shape)
+	}
+
+	// current challenge requires normalization along rows (dim=1).
+	// TODO[improvement]: handle generic case
+
+	rows, cols := t.Shape[0], t.Shape[1]
+	if dim == 1 {
+		for i := 0; i < rows; i++ {
+			rowStartFlatIdx, err := t.getFlatArrayIdx(i, 0)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Softmax error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+			}
+			rowEndFlatIdx, err := t.getFlatArrayIdx(i, cols-1)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Softmax error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+			}
+
+			/*
+				For numerical stability do exp(z-zmax)/(sum(exp(z-zmax)))
+			*/
+			rowMax := slices.Max(t.Values[rowStartFlatIdx : rowEndFlatIdx+1])
+			rowSum := float32(0)
+			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
+				exponent := float64((t.Values[j] - rowMax) / temp)
+				t.Values[j] = float32(math.Exp(exponent))
+				rowSum += t.Values[j]
+			}
+
+			// normalize
+			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
+				t.Values[j] /= rowSum
+			}
+		}
+	}
+
+	return t, nil
 }
 
 func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
