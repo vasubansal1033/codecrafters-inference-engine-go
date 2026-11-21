@@ -19,6 +19,46 @@ type tensor struct {
 	Values []float32
 }
 
+func (t1 tensor) add(t2 tensor) (tensor, error) {
+	t1Shape, t2Shape := t1.Shape, t2.Shape
+	if (t1Shape[0] != t2Shape[0]) || (t1Shape[1] != t2Shape[1]) {
+		return tensor{}, fmt.Errorf("Addition error: invalid shapes %v + %v", t1Shape, t2Shape)
+	}
+
+	for i := 0; i < t1Shape[0]; i++ {
+		for j := 0; j < t2Shape[1]; j++ {
+			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Addition error[1]: invalid shapes %v + %v", t1Shape, t2Shape)
+			}
+			t2FlatIdx, err := t2.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Addition error[2]: invalid shapes %v + %v", t1Shape, t2Shape)
+			}
+
+			t1.Values[t1FlatIdx] += t2.Values[t2FlatIdx]
+		}
+	}
+
+	return t1, nil
+}
+
+func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
+	t1Shape := t1.Shape
+	for i := 0; i < t1Shape[0]; i++ {
+		for j := 0; j < t1Shape[1]; j++ {
+			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Scale error[1]: invalid shapes %v", t1Shape)
+			}
+
+			t1.Values[t1FlatIdx] *= n
+		}
+	}
+
+	return t1, nil
+}
+
 func (t1 *tensor) multiply(t2 tensor) (tensor, error) {
 	t1Shape, t2Shape := t1.Shape, t2.Shape
 	// mxn times nxp -> mxp
