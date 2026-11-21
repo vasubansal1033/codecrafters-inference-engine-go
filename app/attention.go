@@ -95,15 +95,6 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 	layerProjWeights := tmap[fmt.Sprintf("h.%d.attn.c_proj.weight", layer_num)]
 	layerProjBias := tmap[fmt.Sprintf("h.%d.attn.c_proj.bias", layer_num)]
 
-	// fmt.Println("Shapes:")
-	// fmt.Printf("n_embd: %d\n", config.NumberOfEmbeddings)          // 768
-	// fmt.Printf("attention weights: %v\n", layerAttnWeights.Shape)  // [768, 2304]
-	// fmt.Printf("attention bias: %v\n", layerAttnBias.Shape)        // [2304]
-	// fmt.Printf("projection weights: %v\n", layerProjWeights.Shape) // [768, 768]
-	// fmt.Printf("projection bias: %v\n", layerProjBias.Shape)       // [768]
-
-	// fmt.Printf("Input tensor: %+v\n", inputTensor)
-
 	/*
 		TENSOR CALCULATION:
 		input_rows * c_attn.weight + c_attn.bias
@@ -137,27 +128,61 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 		return nil, err
 	}
 
-	score, V, err := calculateScore(add, inputTensor.Shape[0], config.NumberOfEmbeddings)
-	if err != nil {
-		return nil, err
-	}
-	err = applyCausalMask(score)
-	if err != nil {
-		return nil, err
-	}
-
-	softmaxScore, err := score.softmax(1, 1)
-	if err != nil {
-		return nil, err
+	// n_pos := config.NumberOfPositions
+	n_pos := inputTensor.Shape[0]
+	n_embd := config.NumberOfEmbeddings
+	n_heads := config.NumberOfHeads
+	if n_heads <= 0 || n_embd%n_heads != 0 {
+		return nil, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", n_embd, n_heads)
 	}
 
-	// causally attended embeddings
-	weightedScore, err := softmaxScore.multiply(V)
-	if err != nil {
-		return nil, err
+	// MHA calculation
+	/*
+		Multi Head Attention
+		Q, K, V -> (n_pos, n_embd)
+		Each divided into n_heads
+		For e.g., Q ->
+			Qi -> (n_pos, head_dim) where head_dim = n_embd/n_heads
+			Q = [Q1 | Q2 .... | Qn_heads]
+	*/
+	head_dim := n_embd / n_heads
+	attended := tensor{
+		DType:  add.DType,
+		Shape:  []int{n_pos, n_embd},
+		Values: make([]float32, n_pos*n_embd),
 	}
 
-	mul, err = weightedScore.multiply(layerProjWeights)
+	// attention for hth head
+	for h := 0; h < n_heads; h++ {
+		score, V, err := calculateScore(add, n_pos, n_embd, n_heads, h)
+		if err != nil {
+			return nil, err
+		}
+		err = applyCausalMask(score)
+		if err != nil {
+			return nil, err
+		}
+
+		softmaxScore, err := score.softmax(1, 1)
+		if err != nil {
+			return nil, err
+		}
+
+		// causally attended embeddings
+		headOut, err := softmaxScore.multiply(V)
+		if err != nil {
+			return nil, err
+		}
+
+		// placing this sub-head's attention (n_pos, n_embd/n_head)
+		// in over head's attention (n_pos, n_embd)
+		for i := 0; i < n_pos; i++ {
+			dst := i*n_embd + h*head_dim
+			copy(attended.Values[dst:dst+head_dim], headOut.Values[i*head_dim:(i+1)*head_dim])
+		}
+	}
+
+	mul, err = attended.multiply(layerProjWeights)
 	if err != nil {
 		return nil, err
 	}
@@ -167,16 +192,15 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 		return nil, err
 	}
 
-	// fmt.Printf("score shape: %v\n", res.Shape)
-
 	return res.get2DArray(), nil
 }
 
-// splits [Q | K | V] and returns Q K^T / sqrt(d_k) and V
-func calculateScore(t tensor, n_pos int, n_embd int) (tensor, tensor, error) {
+// split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
+// In MHA performs calculation for Qh, Kh, Vh
+func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (tensor, tensor, error) {
 	tshape := t.Shape
-	if len(tshape) != 2 || n_pos < 0 || n_embd <= 0 || tshape[0] != n_pos || tshape[1] != 3*n_embd || len(t.Values) < n_pos*3*n_embd {
-		return tensor{}, tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d and n_embd: %d", tshape, n_pos, n_embd)
+	if len(tshape) != 2 || n_pos < 0 || n_embd <= 0 || n_heads <= 0 || head < 0 || head >= n_heads || n_embd%n_heads != 0 || tshape[0] != n_pos || tshape[1] != 3*n_embd || len(t.Values) < n_pos*3*n_embd {
+		return tensor{}, tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, n_pos, n_embd, n_heads)
 	}
 
 	q := tensor{
@@ -203,6 +227,20 @@ func calculateScore(t tensor, n_pos int, n_embd int) (tensor, tensor, error) {
 		copy(v.Values[i*n_embd:(i+1)*n_embd], row[2*n_embd:3*n_embd])
 	}
 
+	// q, k, v are sliced heads representing the head indexed "head" argument
+	// dimension is (n_pos, head_dim)
+	/*
+		attention input: [Q|K\V] -> (n_pos, 3*n_embd)
+		Q, K, V -> (n_pos, n_embd)
+		Now these are again sliced
+		Q -> [q0|q1|...|qm] where m = head_dim
+		K -> [k0|k1|...|km]
+		V -> [v0|v1|...|vm]
+	*/
+	head_dim := n_embd / n_heads
+	// q, k, v actually are qi's above
+	q, k, v = sliceHead(q, head, head_dim), sliceHead(k, head, head_dim), sliceHead(v, head, head_dim)
+
 	kT, err := k.transpose()
 	if err != nil {
 		return tensor{}, tensor{}, err
@@ -211,10 +249,24 @@ func calculateScore(t tensor, n_pos int, n_embd int) (tensor, tensor, error) {
 	if err != nil {
 		return tensor{}, tensor{}, err
 	}
-	// Dot is over key_dim= n_embd
-	dK := float32(n_embd)
+	// Dot is over key_dim = n_embd/n_heads.
+	dK := float32(head_dim)
 	res, err := qk.scalerMultiply(1 / float32(math.Sqrt(float64(dK))))
 	return res, v, err
+}
+
+func sliceHead(t tensor, head int, head_dim int) tensor {
+	n_pos, n_embd := t.Shape[0], t.Shape[1]
+	start := head * head_dim
+	out := tensor{
+		DType:  t.DType,
+		Shape:  []int{n_pos, head_dim},
+		Values: make([]float32, n_pos*head_dim),
+	}
+	for i := 0; i < n_pos; i++ {
+		copy(out.Values[i*head_dim:(i+1)*head_dim], t.Values[i*n_embd+start:i*n_embd+start+head_dim])
+	}
+	return out
 }
 
 func applyCausalMask(t tensor) error {
