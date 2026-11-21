@@ -92,6 +92,39 @@ func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
 	return out, nil
 }
 
+func (t tensor) transpose() (tensor, error) {
+	rank1 := len(t.Shape) == 1
+	if rank1 {
+		t.Shape = []int{1, t.Shape[0]}
+	}
+	if len(t.Shape) != 2 {
+		return tensor{}, fmt.Errorf("Transpose error: invalid shape %v", t.Shape)
+	}
+
+	rows, cols := t.Shape[0], t.Shape[1]
+	out := tensor{
+		DType:  t.DType,
+		Shape:  []int{cols, rows},
+		Values: make([]float32, rows*cols),
+	}
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			src, err := t.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Transpose error[1]: invalid shapes %v", t.Shape)
+			}
+			// out shape is [cols, rows], so element (j, i) is the transposed spot.
+			dst, err := out.getFlatArrayIdx(j, i)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Transpose error[2]: invalid shapes %v", out.Shape)
+			}
+			out.Values[dst] = t.Values[src]
+		}
+	}
+
+	return out, nil
+}
+
 func (t1 tensor) exp() (tensor, error) {
 	rank1 := len(t1.Shape) == 1
 	if rank1 {
@@ -165,7 +198,7 @@ func (t tensor) softmax(dim int, temp float32) (tensor, error) {
 		return tensor{}, fmt.Errorf("Softmax error: Invalid dimension %d passed for shape %v", dim, t.Shape)
 	}
 	if temp <= 0 {
-		return tensor{}, fmt.Errorf("Softmax error: Invalid temperature value %d passed", temp)
+		return tensor{}, fmt.Errorf("Softmax error: Invalid temperature value %v passed", temp)
 	}
 
 	// current challenge requires normalization along rows (dim=1).
