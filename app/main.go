@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 )
 
 // tensor is one table of numbers from a safetensors file.
@@ -215,6 +216,30 @@ func loadConfig(path string) (GPT2Config, error) {
 	return config, nil
 }
 
+func loadInputRows(path string) ([][]int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	decoder := json.NewDecoder(reader)
+
+	var inputRows [][]int
+	if err := decoder.Decode(&inputRows); err != nil {
+		return nil, err
+	}
+
+	return inputRows, nil
+}
+
+func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int, inputs [][]int) ([][]float32, error) {
+	fmt.Printf("config: %v\nlayer_num: %d\ninputs: %v", config, layer_num, inputs)
+
+	return nil, nil
+}
+
 // Usage: your_program.sh <command> <arg1> <arg2> ...
 func main() {
 	if len(os.Args) < 2 {
@@ -288,19 +313,44 @@ func main() {
 			os.Exit(1)
 		}
 
+		modelPath := os.Args[2]
 		configPath := os.Args[3]
-		config, err := loadConfig(configPath)
+		layerNumInput := os.Args[4]
+		inputsPath := os.Args[5]
+
+		tensors, err := loadTensors(modelPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while loading configs")
+			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
 		}
 
-		configMarshal, err := json.Marshal(config)
+		config, err := loadConfig(configPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error encoding config: %s\n", err)
+			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(configMarshal))
+
+		layerNum, err := strconv.Atoi(layerNumInput)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while parisng layer number: %s\n", err)
+			os.Exit(1)
+		}
+
+		inputs, err := loadInputRows(inputsPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while loading inputs: %s\n", err)
+			os.Exit(1)
+		}
+
+		attn, err := calculateAttenion(
+			tensors,
+			config,
+			layerNum,
+			inputs,
+		)
+
+		fmt.Printf("%v", attn)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
