@@ -22,11 +22,37 @@ type tensor struct {
 
 // TODO[improvement]: current implementations work only for 2D tensors
 func (t1 tensor) add(t2 tensor) (tensor, error) {
-	t1Shape, t2Shape := t1.Shape, t2.Shape
-	if (t1Shape[0] != t2Shape[0]) || (t1Shape[1] != t2Shape[1]) {
-		return tensor{}, fmt.Errorf("Addition error: invalid shapes %v + %v", t1Shape, t2Shape)
+	// Shape [n] is one row. [m,n] + [n] and [m,n] + [1,n] broadcast on that row.
+	bothRank1 := len(t1.Shape) == 1 && len(t2.Shape) == 1
+	dtype := t1.DType
+	if len(t1.Shape) == 1 {
+		t1.Shape = []int{1, t1.Shape[0]}
+	}
+	if len(t2.Shape) == 1 {
+		t2.Shape = []int{1, t2.Shape[0]}
 	}
 
+	t1Shape, t2Shape := t1.Shape, t2.Shape
+	if len(t1Shape) != 2 || len(t2Shape) != 2 || t1Shape[1] != t2Shape[1] || (t1Shape[0] != t2Shape[0] && t1Shape[0] != 1 && t2Shape[0] != 1) {
+		return tensor{}, fmt.Errorf("Addition error: invalid shapes %v + %v", t1Shape, t2Shape)
+	}
+	if t1Shape[0] == 1 && t2Shape[0] != 1 {
+		t1, t2 = t2, t1
+		t1Shape, t2Shape = t1.Shape, t2.Shape
+	}
+	if t2Shape[0] == 1 && t1Shape[0] != 1 {
+		repeated := make([]float32, t1Shape[0]*t1Shape[1])
+		for i := 0; i < t1Shape[0]; i++ {
+			copy(repeated[i*t1Shape[1]:(i+1)*t1Shape[1]], t2.Values)
+		}
+		t2 = tensor{DType: t2.DType, Shape: []int{t1Shape[0], t1Shape[1]}, Values: repeated}
+		t2Shape = t2.Shape
+	}
+
+	out := t1
+	out.DType = dtype
+	out.Shape = []int{t1Shape[0], t1Shape[1]}
+	out.Values = slices.Clone(t1.Values)
 	for i := 0; i < t1Shape[0]; i++ {
 		for j := 0; j < t2Shape[1]; j++ {
 			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
@@ -38,15 +64,24 @@ func (t1 tensor) add(t2 tensor) (tensor, error) {
 				return tensor{}, fmt.Errorf("Addition error[2]: invalid shapes %v + %v", t1Shape, t2Shape)
 			}
 
-			t1.Values[t1FlatIdx] += t2.Values[t2FlatIdx]
+			out.Values[t1FlatIdx] += t2.Values[t2FlatIdx]
 		}
 	}
+	if bothRank1 {
+		out.Shape = []int{t1Shape[1]}
+	}
 
-	return t1, nil
+	return out, nil
 }
 
 func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
+	rank1 := len(t1.Shape) == 1
+	if rank1 {
+		t1.Shape = []int{1, t1.Shape[0]}
+	}
 	t1Shape := t1.Shape
+	out := t1
+	out.Values = slices.Clone(t1.Values)
 	for i := 0; i < t1Shape[0]; i++ {
 		for j := 0; j < t1Shape[1]; j++ {
 			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
@@ -54,15 +89,24 @@ func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
 				return tensor{}, fmt.Errorf("Scale error[1]: invalid shapes %v", t1Shape)
 			}
 
-			t1.Values[t1FlatIdx] *= n
+			out.Values[t1FlatIdx] *= n
 		}
 	}
+	if rank1 {
+		out.Shape = []int{t1Shape[1]}
+	}
 
-	return t1, nil
+	return out, nil
 }
 
-func (t1 tensor) exp(n float32) (tensor, error) {
+func (t1 tensor) exp() (tensor, error) {
+	rank1 := len(t1.Shape) == 1
+	if rank1 {
+		t1.Shape = []int{1, t1.Shape[0]}
+	}
 	t1Shape := t1.Shape
+	out := t1
+	out.Values = slices.Clone(t1.Values)
 	for i := 0; i < t1Shape[0]; i++ {
 		for j := 0; j < t1Shape[1]; j++ {
 			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
@@ -70,11 +114,14 @@ func (t1 tensor) exp(n float32) (tensor, error) {
 				return tensor{}, fmt.Errorf("Scale error[1]: invalid shapes %v", t1Shape)
 			}
 
-			t1.Values[t1FlatIdx] = float32(math.Exp(float64(t1.Values[t1FlatIdx])))
+			out.Values[t1FlatIdx] = float32(math.Exp(float64(t1.Values[t1FlatIdx])))
 		}
 	}
+	if rank1 {
+		out.Shape = []int{t1Shape[1]}
+	}
 
-	return t1, nil
+	return out, nil
 }
 
 func (t1 *tensor) multiply(t2 tensor) (tensor, error) {
@@ -121,14 +168,19 @@ func (t1 *tensor) multiply(t2 tensor) (tensor, error) {
 }
 
 func (t tensor) softmax(dim int, temp float32) (tensor, error) {
-	if dim >= len(t.Shape) {
+	if dim != 1 {
 		return tensor{}, fmt.Errorf("Softmax error: Invalid dimension %d passed for shape %v", dim, t.Shape)
+	}
+	if temp <= 0 {
+		return tensor{}, fmt.Errorf("Softmax error: Invalid temperature value %d passed", temp)
 	}
 
 	// current challenge requires normalization along rows (dim=1).
 	// TODO[improvement]: handle generic case
 
 	rows, cols := t.Shape[0], t.Shape[1]
+	out := t
+	out.Values = slices.Clone(t.Values)
 	if dim == 1 {
 		for i := 0; i < rows; i++ {
 			rowStartFlatIdx, err := t.getFlatArrayIdx(i, 0)
@@ -143,22 +195,22 @@ func (t tensor) softmax(dim int, temp float32) (tensor, error) {
 			/*
 				For numerical stability do exp(z-zmax)/(sum(exp(z-zmax)))
 			*/
-			rowMax := slices.Max(t.Values[rowStartFlatIdx : rowEndFlatIdx+1])
+			rowMax := slices.Max(out.Values[rowStartFlatIdx : rowEndFlatIdx+1])
 			rowSum := float32(0)
 			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
-				exponent := float64((t.Values[j] - rowMax) / temp)
-				t.Values[j] = float32(math.Exp(exponent))
-				rowSum += t.Values[j]
+				exponent := float64((out.Values[j] - rowMax) / temp)
+				out.Values[j] = float32(math.Exp(exponent))
+				rowSum += out.Values[j]
 			}
 
 			// normalize
 			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
-				t.Values[j] /= rowSum
+				out.Values[j] /= rowSum
 			}
 		}
 	}
 
-	return t, nil
+	return out, nil
 }
 
 func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
@@ -169,7 +221,17 @@ func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
 		6(2, 0) 7(2, 1) 8(2, 2)
 
 	*/
-	cols := t.Shape[1]
+	var rows, cols int
+	if len(t.Shape) == 1 {
+		rows, cols = 1, t.Shape[0]
+	} else if len(t.Shape) == 2 {
+		rows, cols = t.Shape[0], t.Shape[1]
+	} else {
+		return -1, fmt.Errorf("Invalid indices: %d %d for shape %v", i, j, t.Shape)
+	}
+	if i < 0 || j < 0 || i >= rows || j >= cols {
+		return -1, fmt.Errorf("Invalid indices: %d %d for shape %v", i, j, t.Shape)
+	}
 	idx := i*cols + j
 	if idx >= len(t.Values) {
 		return -1, fmt.Errorf("Invalid indices: %d %d for shape %v", i, j, t.Shape)
@@ -271,6 +333,9 @@ func getEmbeddingFromTensorValues(t tensor, id int) ([]float32, error) {
 	// basic sanity check
 	if tensorShape[0]*tensorShape[1] != len(tensorValues) {
 		return nil, fmt.Errorf("Invalid tensor with shape %d x %d and number of values %d", tensorShape[0], tensorShape[1], len(tensorValues))
+	}
+	if id < 0 || id >= tensorShape[0] {
+		return nil, fmt.Errorf("id %d out of range for shape %v", id, tensorShape)
 	}
 
 	/*
