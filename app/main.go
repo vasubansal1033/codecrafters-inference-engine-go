@@ -104,7 +104,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		inputs, err := loadInputRows(inputsPath)
+		inputTensor, err := loadInputRows(inputsPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading inputs: %s\n", err)
 			os.Exit(1)
@@ -114,7 +114,7 @@ func main() {
 			tensors,
 			config,
 			layerNum,
-			inputs,
+			inputTensor,
 		)
 
 		fmt.Printf("%v", attn)

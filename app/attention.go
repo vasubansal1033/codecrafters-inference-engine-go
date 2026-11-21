@@ -55,25 +55,38 @@ func loadConfig(path string) (GPT2Config, error) {
 	return config, nil
 }
 
-func loadInputRows(path string) ([][]int, error) {
+func loadInputRows(path string) (tensor, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return tensor{}, err
 	}
 	defer f.Close()
 
 	reader := bufio.NewReader(f)
 	decoder := json.NewDecoder(reader)
 
-	var inputRows [][]int
+	var inputRows [][]float32
 	if err := decoder.Decode(&inputRows); err != nil {
-		return nil, err
+		return tensor{}, err
 	}
 
-	return inputRows, nil
+	// convert to tensor output
+	// [num_pos, n_embd]
+	tensorShape := []int{len(inputRows), len(inputRows[0])}
+	inputTensor := tensor{
+		DType:  "F32",
+		Shape:  tensorShape,
+		Values: []float32{},
+	}
+
+	for i := range len(inputRows) {
+		inputTensor.Values = append(inputTensor.Values, inputRows[i][:]...)
+	}
+
+	return inputTensor, nil
 }
 
-func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int, inputs [][]int) ([][]float32, error) {
+func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) ([][]float32, error) {
 	// fmt.Printf("config: %v\nlayer_num: %d\ninputs: %v", config, layer_num, inputs)
 
 	layerAttnWeights := tmap["h.0.attn.c_attn.weight"]
@@ -88,22 +101,6 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 	fmt.Printf("projection weights: %v\n", layerProjWeights.Shape) // [768, 768]
 	fmt.Printf("projection bias: %v\n", layerProjBias.Shape)       // [768]
 
-	t1 := tensor{
-		DType:  "float32",
-		Shape:  []int{1, 2},
-		Values: []float32{1.0, 2.0},
-	}
-	t2 := tensor{
-		DType:  "float32",
-		Shape:  []int{2, 2},
-		Values: []float32{3.0, 4.0, 5.0, 6.0},
-	}
-
-	res, err := t1.multiply(t2)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Multiplication error: %s\n", err)
-	}
-	fmt.Printf("Mult result: %+v\n", res)
-
+	fmt.Printf("Input tensor: %+v\n", inputTensor)
 	return nil, nil
 }
