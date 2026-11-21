@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -76,7 +77,7 @@ func embedTokenIds(tmap map[string]tensor, tokenIds []int) ([][]float32, error) 
 	numTokenIds := len(tokenIds)
 	embedding := make([][]float32, numTokenIds)
 	for pos := range numTokenIds {
-		tokenId := tokenIds[i]
+		tokenId := tokenIds[pos]
 
 		tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
 		if err != nil {
@@ -118,11 +119,12 @@ func getEmbeddingFromTensorValues(t tensor, id int) ([]float32, error) {
 		each row represents token embedding
 
 		For tokenId 1 ->
-			skip shape[1]*tokenId elements and take shape[0] elements
+			skip shape[1]*tokenId elements and take shape[1] elements
 	*/
-	embedding := make([]float32, tensorShape[0])
-	for i := 0; i < tensorShape[0]; i++ {
-		tensorValuesOffset := tensorShape[1]*id + i
+	// shape is [rows, dim]. One row is dim floats, not rows floats.
+	embedding := make([]float32, tensorShape[1])
+	for i := 0; i < tensorShape[1]; i++ {
+		tensorValuesOffset := tensorShape[1] * id
 		embedding[i] = tensorValues[tensorValuesOffset+i]
 	}
 
@@ -143,11 +145,26 @@ func mergeTokenAndPosEmbeddings(tokenEmbedding []float32, posEmbedding []float32
 	return mergedEmbedding, nil
 }
 
+func loadTokenIds(path string) ([]int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	decoder := json.NewDecoder(reader)
+
+	var ids []int
+	if err = decoder.Decode(&ids); err != nil {
+		return nil, err
+	}
+
+	return ids, nil
+}
+
 // Usage: your_program.sh <command> <arg1> <arg2> ...
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	// fmt.Fprintf(os.Stderr, "Logs from your program will appear here!\n")
-
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: your_program.sh <command> [<args>...]\n")
 		os.Exit(1)
@@ -185,6 +202,35 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(string(encoded))
+	case "embed":
+		if (len(os.Args)) < 4 {
+			fmt.Fprintf(os.Stderr, "usage: your_program.sh embed model.safetensors ids.json\n")
+			os.Exit(1)
+		}
+
+		tensors, err := loadTensors(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
+			os.Exit(1)
+		}
+		tokenIds, err := loadTokenIds(os.Args[3])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading token ids: %s\n", err)
+			os.Exit(1)
+		}
+
+		mergedEmbeddings, err := embedTokenIds(tensors, tokenIds)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
+			os.Exit(1)
+		}
+		encoded, err := json.Marshal(mergedEmbeddings)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding output: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(encoded))
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
