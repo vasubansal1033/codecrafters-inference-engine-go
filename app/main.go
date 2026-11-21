@@ -235,7 +235,19 @@ func loadInputRows(path string) ([][]int, error) {
 }
 
 func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int, inputs [][]int) ([][]float32, error) {
-	fmt.Printf("config: %v\nlayer_num: %d\ninputs: %v", config, layer_num, inputs)
+	// fmt.Printf("config: %v\nlayer_num: %d\ninputs: %v", config, layer_num, inputs)
+
+	layerAttnWeights := tmap["h.0.attn.c_attn.weight"]
+	layerAttnBias := tmap["h.0.attn.c_attn.bias"]
+	layerProjWeights := tmap["h.0.attn.c_proj.weight"]
+	layerProjBias := tmap["h.0.attn.c_proj.bias"]
+
+	fmt.Println("Shapes:")
+	fmt.Printf("n_embd: %d\n", config.NumberOfEmbeddings)          // 768
+	fmt.Printf("attention weights: %v\n", layerAttnWeights.Shape)  // [768, 2304]
+	fmt.Printf("attention bias: %v\n", layerAttnBias.Shape)        // [2304]
+	fmt.Printf("projection weights: %v\n", layerProjWeights.Shape) // [768, 768]
+	fmt.Printf("projection bias: %v\n", layerProjBias.Shape)       // [768]
 
 	return nil, nil
 }
