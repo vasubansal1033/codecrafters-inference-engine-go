@@ -278,7 +278,7 @@ func (t tensor) layerNorm(dim int) (tensor, error) {
 			stdDev := math.Sqrt(float64(variance))
 
 			// normalize
-			eps := 1e-3 // add eps to std dev for numerical stability
+			eps := 1e-5 // add eps to std dev for numerical stability
 			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
 				out.Values[j] = (out.Values[j] - mean) / float32(stdDev+eps)
 			}

@@ -196,17 +196,41 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 }
 
 func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
+	layerNorm, err := inputTensor.layerNorm(1)
+	if err != nil {
+		return tensor{}, nil
+	}
+
+	// apply layer norm wandb
+	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_1.weight", layer_num)]
+	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_1.bias", layer_num)]
+
+	layerNorm, err = layerNorm.multiply(layerNormWeights)
+	if err != nil {
+		return tensor{}, err
+	}
+	layerNorm, err = layerNorm.add(layerNormBias)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	// calculate attn on layernormed input
 	attn, err := calculateAttention(
 		tmap,
 		config,
 		layer_num,
-		inputTensor,
+		layerNorm,
 	)
 	if err != nil {
 		return tensor{}, err
 	}
 
-	return attn, nil
+	resOutput, err := inputTensor.add(attn)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	return resOutput, nil
 }
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
