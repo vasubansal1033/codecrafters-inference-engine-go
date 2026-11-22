@@ -150,47 +150,98 @@ func (t1 tensor) exp() (tensor, error) {
 	return out, nil
 }
 
-func (t1 *tensor) multiply(t2 tensor) (tensor, error) {
+func (t1 tensor) multiply(t2 tensor) (tensor, error) {
+	// Normal 2D matrix -> perform normal matrix mul
+	if len(t1.Shape) == 2 && len(t2.Shape) == 2 && t1.Shape[1] == t2.Shape[0] {
+		t1Shape, t2Shape := t1.Shape, t2.Shape
+		// mxn times nxp -> mxp
+		resRows, resCols := t1Shape[0], t2Shape[1]
+		res := tensor{
+			DType:  t1.DType, // assuming both have same DType,
+			Shape:  []int{resRows, resCols},
+			Values: make([]float32, resRows*resCols),
+		}
+
+		/*
+			res[i][j] = sum over k t1[i][k].t2[k][j]
+		*/
+		commonDim := t1Shape[1]
+		for i := 0; i < resRows; i++ {
+			for j := 0; j < resCols; j++ {
+				flatIdx, err := res.getFlatArrayIdx(i, j)
+				if err != nil {
+					return tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
+				}
+
+				for k := 0; k < commonDim; k++ {
+					t1FlatIdx, err := t1.getFlatArrayIdx(i, k)
+					if err != nil {
+						return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
+					}
+					t2FlatIdx, err := t2.getFlatArrayIdx(k, j)
+					if err != nil {
+						return tensor{}, fmt.Errorf("Multiplication error[3]: invalid shapes %v x %v", t1Shape, t2Shape)
+					}
+
+					res.Values[flatIdx] += t1.Values[t1FlatIdx] * t2.Values[t2FlatIdx]
+				}
+			}
+		}
+
+		return res, nil
+	}
+
+	// handling if both are 1D tensors
+	// Shape [n] is one row. [m,n] * [n] and [m,n] * [1,n] broadcast on that row.
+	bothRank1 := len(t1.Shape) == 1 && len(t2.Shape) == 1
+	dtype := t1.DType
+	if len(t1.Shape) == 1 {
+		t1.Shape = []int{1, t1.Shape[0]}
+	}
+	if len(t2.Shape) == 1 {
+		t2.Shape = []int{1, t2.Shape[0]}
+	}
+
 	t1Shape, t2Shape := t1.Shape, t2.Shape
-	// mxn times nxp -> mxp
-	if t1Shape[1] != t2Shape[0] {
+	if len(t1Shape) != 2 || len(t2Shape) != 2 || t1Shape[1] != t2Shape[1] || (t1Shape[0] != t2Shape[0] && t1Shape[0] != 1 && t2Shape[0] != 1) {
 		return tensor{}, fmt.Errorf("Multiplication error: invalid shapes %v x %v", t1Shape, t2Shape)
 	}
-
-	resRows, resCols := t1Shape[0], t2Shape[1]
-	res := tensor{
-		DType:  t1.DType, // assuming both have same DType,
-		Shape:  []int{resRows, resCols},
-		Values: make([]float32, resRows*resCols),
+	if t1Shape[0] == 1 && t2Shape[0] != 1 {
+		t1, t2 = t2, t1
+		t1Shape, t2Shape = t1.Shape, t2.Shape
+	}
+	if t2Shape[0] == 1 && t1Shape[0] != 1 {
+		repeated := make([]float32, t1Shape[0]*t1Shape[1])
+		for i := 0; i < t1Shape[0]; i++ {
+			copy(repeated[i*t1Shape[1]:(i+1)*t1Shape[1]], t2.Values)
+		}
+		t2 = tensor{DType: t2.DType, Shape: []int{t1Shape[0], t1Shape[1]}, Values: repeated}
+		t2Shape = t2.Shape
 	}
 
-	/*
-		res[i][j] = sum over k t1[i][k].t2[k][j]
-	*/
-	commonDim := t1Shape[1]
-	for i := 0; i < resRows; i++ {
-		for j := 0; j < resCols; j++ {
-			flatIdx, err := res.getFlatArrayIdx(i, j)
+	out := t1
+	out.DType = dtype
+	out.Shape = []int{t1Shape[0], t1Shape[1]}
+	out.Values = slices.Clone(t1.Values)
+	for i := 0; i < t1Shape[0]; i++ {
+		for j := 0; j < t2Shape[1]; j++ {
+			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
 			if err != nil {
 				return tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
 			}
-
-			for k := 0; k < commonDim; k++ {
-				t1FlatIdx, err := t1.getFlatArrayIdx(i, k)
-				if err != nil {
-					return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
-				}
-				t2FlatIdx, err := t2.getFlatArrayIdx(k, j)
-				if err != nil {
-					return tensor{}, fmt.Errorf("Multiplication error[3]: invalid shapes %v x %v", t1Shape, t2Shape)
-				}
-
-				res.Values[flatIdx] += t1.Values[t1FlatIdx] * t2.Values[t2FlatIdx]
+			t2FlatIdx, err := t2.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
 			}
+
+			out.Values[t1FlatIdx] *= t2.Values[t2FlatIdx]
 		}
 	}
+	if bothRank1 {
+		out.Shape = []int{t1Shape[1]}
+	}
 
-	return res, nil
+	return out, nil
 }
 
 func (t tensor) softmax(dim int, temp float32) (tensor, error) {
@@ -275,12 +326,12 @@ func (t tensor) layerNorm(dim int) (tensor, error) {
 				variance += float32(math.Pow(float64(out.Values[j])-float64(mean), float64(2)))
 			}
 			variance /= float32(cols) // using unbiased variance
-			stdDev := math.Sqrt(float64(variance))
+			eps := 1e-5               // add eps to std dev for numerical stability
+			stdDev := math.Sqrt(float64(variance) + eps)
 
 			// normalize
-			eps := 1e-5 // add eps to std dev for numerical stability
 			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
-				out.Values[j] = (out.Values[j] - mean) / float32(stdDev+eps)
+				out.Values[j] = (out.Values[j] - mean) / float32(stdDev)
 			}
 		}
 	}

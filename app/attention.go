@@ -198,7 +198,7 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
 	layerNorm, err := inputTensor.layerNorm(1)
 	if err != nil {
-		return tensor{}, nil
+		return tensor{}, err
 	}
 
 	// apply layer norm wandb
