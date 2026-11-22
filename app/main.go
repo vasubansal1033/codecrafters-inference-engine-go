@@ -110,7 +110,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		attn, err := calculateAttenion(
+		attn, err := calculateAttention(
 			tensors,
 			config,
 			layerNum,
@@ -121,12 +121,64 @@ func main() {
 			os.Exit(1)
 		}
 
-		attnJson, err := json.Marshal(attn)
+		attnJson, err := json.Marshal(attn.get2DArray())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding attn output: %s\n", err)
 			os.Exit(1)
 		}
 		fmt.Println(string(attnJson))
+	case "block":
+		if len(os.Args) < 5 {
+			fmt.Fprintf(os.Stderr, "usage: your_program.sh block model.safetensors config.json <layer_num> input.json\n")
+			os.Exit(1)
+		}
+
+		modelPath := os.Args[2]
+		configPath := os.Args[3]
+		layerNumInput := os.Args[4]
+		inputsPath := os.Args[5]
+
+		tensors, err := loadTensors(modelPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
+			os.Exit(1)
+		}
+
+		config, err := loadConfig(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
+			os.Exit(1)
+		}
+
+		layerNum, err := strconv.Atoi(layerNumInput)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while parisng layer number: %s\n", err)
+			os.Exit(1)
+		}
+
+		inputTensor, err := loadInputRows(inputsPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while loading inputs: %s\n", err)
+			os.Exit(1)
+		}
+
+		block, err := calculateBlock(
+			tensors,
+			config,
+			layerNum,
+			inputTensor,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while calculating block: %s\n", err)
+			os.Exit(1)
+		}
+
+		blockJson, err := json.Marshal(block.get2DArray())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding block output: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(blockJson))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)

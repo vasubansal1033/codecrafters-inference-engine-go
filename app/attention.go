@@ -87,7 +87,7 @@ func loadInputRows(path string) (tensor, error) {
 	return inputTensor, nil
 }
 
-func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) ([][]float32, error) {
+func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
 	// fmt.Printf("config: %v\nlayer_num: %d\ninputs: %v", config, layer_num, inputs)
 
 	layerAttnWeights := tmap[fmt.Sprintf("h.%d.attn.c_attn.weight", layer_num)]
@@ -120,12 +120,12 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 
 	mul, err := inputTensor.multiply(layerAttnWeights)
 	if err != nil {
-		return nil, err
+		return tensor{}, err
 	}
 
 	add, err := mul.add(layerAttnBias)
 	if err != nil {
-		return nil, err
+		return tensor{}, err
 	}
 
 	// n_pos := config.NumberOfPositions
@@ -133,7 +133,7 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 	n_embd := config.NumberOfEmbeddings
 	n_heads := config.NumberOfHeads
 	if n_heads <= 0 || n_embd%n_heads != 0 {
-		return nil, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", n_embd, n_heads)
+		return tensor{}, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", n_embd, n_heads)
 	}
 
 	// MHA calculation
@@ -156,22 +156,22 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 	for h := 0; h < n_heads; h++ {
 		score, V, err := calculateScore(add, n_pos, n_embd, n_heads, h)
 		if err != nil {
-			return nil, err
+			return tensor{}, err
 		}
 		err = applyCausalMask(score)
 		if err != nil {
-			return nil, err
+			return tensor{}, err
 		}
 
 		softmaxScore, err := score.softmax(1, 1)
 		if err != nil {
-			return nil, err
+			return tensor{}, err
 		}
 
 		// causally attended embeddings
 		headOut, err := softmaxScore.multiply(V)
 		if err != nil {
-			return nil, err
+			return tensor{}, err
 		}
 
 		// placing this sub-head's attention (n_pos, n_embd/n_head)
@@ -184,15 +184,29 @@ func calculateAttenion(tmap map[string]tensor, config GPT2Config, layer_num int,
 
 	mul, err = attended.multiply(layerProjWeights)
 	if err != nil {
-		return nil, err
+		return tensor{}, err
 	}
 
 	res, err := mul.add(layerProjBias)
 	if err != nil {
-		return nil, err
+		return tensor{}, err
 	}
 
-	return res.get2DArray(), nil
+	return res, nil
+}
+
+func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
+	attn, err := calculateAttention(
+		tmap,
+		config,
+		layer_num,
+		inputTensor,
+	)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	return attn, nil
 }
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
