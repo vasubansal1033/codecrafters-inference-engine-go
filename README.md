@@ -1,6 +1,4 @@
-This repository is a Go program for the CodeCrafters "Build Your Own Inference Engine" challenge. It loads GPT-2 weights from a safetensors file, embeds token ids, runs multi-head attention for one layer, and runs the attention half of one transformer block. The longest section below is how `add` and `multiply` line up a matrix with a vector. The shapes and formulas were checked against `app/tensor.go`, `app/attention.go`, `app/main.go`, and `go.mod` (`go 1.26.0`) on 22 November 2026.
-
-The walkthrough with the small tensors, from the weight file through the block, is in `concepts.md`.
+This repository is a Go program for the CodeCrafters "Build Your Own Inference Engine" challenge. It loads GPT-2 weights from a safetensors file, embeds token ids, runs multi-head attention for one layer, and runs the attention half of one transformer block. The longest section below is how `add` and `broadcastMultiply` line a matrix up with a vector. The shapes and formulas were checked against `app/tensor.go`, `app/attention.go`, `app/main.go`, and `go.mod` (`go 1.26.0`) on 22 November 2026.
 
 ## What is implemented
 
@@ -10,7 +8,7 @@ A tensor is a flat `[]float32` plus a shape, stored row by row. Shape `[n]` is a
 
 ## Broadcasting
 
-> Note. In GPT-2 the internal weights (`c_attn`, `c_proj`, and the MLP matrices) are matrix products, done by `matmul`. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one scale per column, multiplied onto every token by `broadcastMultiply`. `add` is only the broadcast, so it stays one function. The pictures are in `concepts.md`, under What multiply does.
+> Note. In GPT-2 the internal weights (`c_attn`, `c_proj`, and the MLP matrices) are matrix products, done by `matmul`. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one scale per column, multiplied onto every token by `broadcastMultiply`. `add` is only the broadcast, so it stays one function. The pictures are in [concepts.md](concepts.md#what-multiply-does), under What multiply does.
 
 GPT-2 stores several parameters as one list whose length is the embedding size: `h.{layer}.attn.c_attn.bias`, `h.{layer}.attn.c_proj.bias`, `h.{layer}.ln_1.weight`, and `h.{layer}.ln_1.bias`. A forward pass has one row per token, so the activation is `[n_pos, n_embd]`, or `[n_pos, 3*n_embd]` after the fused query, key, and value projection. The vector has to meet every row. That stretch is the broadcast.
 
