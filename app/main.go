@@ -69,7 +69,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
 			os.Exit(1)
 		}
-		encoded, err := json.Marshal(mergedEmbeddings)
+		encoded, err := json.Marshal(mergedEmbeddings.get2DArray())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding output: %s\n", err)
 			os.Exit(1)

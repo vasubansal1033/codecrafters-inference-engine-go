@@ -14,31 +14,36 @@ import (
 // embedTokens calculates the embedding and returns result as 2D array
 // (token embedding + position embedding of token in prompt)
 // tokenId[i] -> i position, tokenId[i] -> token id
-func embedTokenIds(tmap map[string]tensor, tokenIds []int) ([][]float32, error) {
+func embedTokenIds(tmap map[string]tensor, tokenIds []int) (tensor, error) {
 	numTokenIds := len(tokenIds)
-	embedding := make([][]float32, numTokenIds)
+	var embedding []float32
 	for pos := range numTokenIds {
 		tokenId := tokenIds[pos]
 
 		tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
 		if err != nil {
-			return nil, err
+			return tensor{}, err
 		}
 		posEmbedding, err := getEmbeddingFromTensorValues(tmap["wpe.weight"], pos)
 		if err != nil {
-			return nil, err
+			return tensor{}, err
 		}
 
 		// merge the two embeddings
 		mergedEmbedding, err := mergeTokenAndPosEmbeddings(tokenEmbedding, posEmbedding)
 		if err != nil {
-			return nil, err
+			return tensor{}, err
 		}
 
-		embedding[pos] = mergedEmbedding
+		embedding = append(embedding, mergedEmbedding...)
 	}
 
-	return embedding, nil
+	n_embd := len(embedding) / numTokenIds
+	return tensor{
+		DType:  "F32",
+		Shape:  []int{n_embd, numTokenIds},
+		Values: embedding,
+	}, nil
 }
 
 func getEmbeddingFromTensorValues(t tensor, id int) ([]float32, error) {
