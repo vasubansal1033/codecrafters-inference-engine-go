@@ -8,6 +8,10 @@ import (
 	"os"
 )
 
+const (
+	SQRT_TWO_OVER_PI float32 = 0.7978845608028654 // sqrt(2 / pi)
+)
+
 /*
 attention
 */
@@ -201,7 +205,7 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 		return tensor{}, err
 	}
 
-	// apply layer norm wandb
+	// apply layer norm-1 wandb
 	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_1.weight", layer_num)]
 	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_1.bias", layer_num)]
 
@@ -226,6 +230,11 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 	}
 
 	resOutput, err := inputTensor.add(attn)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	resOutput, err = performMLP(tmap, config, layer_num, resOutput)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -293,6 +302,64 @@ func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (ten
 	return res, v, err
 }
 
+func performMLP(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
+	// apply layer norm-2 wandb
+	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_2.weight", layer_num)]
+	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_2.bias", layer_num)]
+
+	inputTensorLayerNormed, err := inputTensor.layerNorm(1)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	layerNormOutput, err := inputTensorLayerNormed.broadcastMultiply(layerNormWeights)
+	if err != nil {
+		return tensor{}, err
+	}
+	layerNormOutput, err = layerNormOutput.add(layerNormBias)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	// apply MLP weights
+	mlpWeights := tmap[fmt.Sprintf("h.%d.mlp.c_fc.weight", layer_num)]
+	mlpBias := tmap[fmt.Sprintf("h.%d.mlp.c_fc.bias", layer_num)]
+
+	mlpOutput, err := layerNormOutput.matmul(mlpWeights)
+	if err != nil {
+		return tensor{}, err
+	}
+	mlpOutput, err = mlpOutput.add(mlpBias)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	// apply gelu approx. which is element wise operation
+	for i := 0; i < len(mlpOutput.Values); i++ {
+		mlpOutput.Values[i] = geluApprox(mlpOutput.Values[i])
+	}
+
+	// apply MLP projection
+	mlpProjWeights := tmap[fmt.Sprintf("h.%d.mlp.c_proj.weight", layer_num)]
+	mlpProjBias := tmap[fmt.Sprintf("h.%d.mlp.c_proj.bias", layer_num)]
+
+	mlpOutput, err = mlpOutput.matmul(mlpProjWeights)
+	if err != nil {
+		return tensor{}, err
+	}
+	mlpOutput, err = mlpOutput.add(mlpProjBias)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	mlpOutput, err = inputTensor.add(mlpOutput)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	return mlpOutput, nil
+}
+
 func sliceHead(t tensor, head int, head_dim int) tensor {
 	n_pos, n_embd := t.Shape[0], t.Shape[1]
 	start := head * head_dim
@@ -325,4 +392,10 @@ func applyCausalMask(t tensor) error {
 	}
 
 	return nil
+}
+
+// geluApprox(x) = 0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x^3)))
+func geluApprox(x float32) float32 {
+	X := float64(x)
+	return 0.5 * x * (1 + float32(math.Tanh(float64(SQRT_TWO_OVER_PI)*(X+(float64(0.044715)*math.Pow(X, float64(3)))))))
 }
