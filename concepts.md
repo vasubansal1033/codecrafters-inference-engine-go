@@ -105,7 +105,7 @@ position 1, id 0     wte row 0 [1, 2]  +  wpe row 1 [30, 40]  =  [31, 42]
 
 Take a `[2, 3]` matrix and stand the list `10, 20, 30` up as a column of shape `[3, 1]`. Inner size 3 matches inner size 3, so this is a product, and the answer is one number per row:
 
-$$
+```math
 \begin{bmatrix}
 1 & 2 & 3 \\
 4 & 5 & 6
@@ -123,7 +123,7 @@ $$
 140 \\
 320
 \end{bmatrix}
-$$
+```
 
 ```mermaid
 flowchart LR
@@ -137,14 +137,14 @@ flowchart LR
 
 A one-token prompt is the same kind of product. The left side has a single row, and it still dots with each column of the weight:
 
-$$
+```math
 \begin{bmatrix} 1 & 2 \end{bmatrix}
 \begin{bmatrix} 3 & 4 \\ 5 & 6 \end{bmatrix}
 =
 \begin{bmatrix} 1\cdot 3 + 2\cdot 5 & 1\cdot 4 + 2\cdot 6 \end{bmatrix}
 =
 \begin{bmatrix} 13 & 16 \end{bmatrix}
-$$
+```
 
 ```mermaid
 flowchart TD
@@ -180,15 +180,15 @@ Position 0 has only itself. Position 1 may use position 0 and itself. There is n
 
 Each row is turned into three lists. The query is what this position is looking for. The key is how this position describes itself, so that someone else's query can match it. The value is the content this position hands over when it is chosen. The score between position `i` and position `j` is the dot product of query `i` with key `j`, divided by the square root of the length of those lists. A longer list makes a larger dot product for the same kind of match. A huge score makes the next step put almost all of the weight on one position. Dividing by the square root keeps the scores in a similar range when the lists grow from the toy width of 1 to GPT-2's 768.
 
-$$
+```math
 \mathrm{score}_{ij} = \frac{q_i \cdot k_j}{\sqrt{d}}
-$$
+```
 
 Softmax turns one row of scores into weights that add up to 1. The code subtracts the largest score in the row before calling `exp`. The weights come out the same, and `exp` of a large number does not overflow. A score that leads another by 2 gets about `e^2`, roughly 7 times the weight.
 
-$$
+```math
 \mathrm{weight}_i = \frac{e^{z_i - z_{\max}}}{\sum_j e^{z_j - z_{\max}}}
-$$
+```
 
 The whole head, from the input row to the projected row:
 
@@ -205,7 +205,7 @@ flowchart LR
 
 The toy stage sets `n_embd` to 1, so every row is a single number. The input is `[[1], [2]]`, shape `[2, 1]`. `c_attn.weight` is shape `[1, 3]`, filled with ones, and `c_attn.bias` is `[0, 0, 0]`. The weight multiply is the matrix product above: each input number is dotted with each column of ones, which copies it into the query, the key, and the value.
 
-$$
+```math
 \begin{bmatrix} 1 \\ 2 \end{bmatrix}
 \begin{bmatrix} 1 & 1 & 1 \end{bmatrix}
 =
@@ -213,7 +213,7 @@ $$
 1 & 1 & 1 \\
 2 & 2 & 2
 \end{bmatrix}
-$$
+```
 
 The bias is a 1D list of length 3, so it takes the column-scale path and is added to every row. Here every entry is zero.
 
@@ -224,7 +224,7 @@ position 1    query 2    key 2    value 2
 
 Dividing by `sqrt(1)` changes nothing. The score matrix, with the forbidden later column written as negative infinity, is on the left. Softmax of a row that contains negative infinity gives that column weight 0, because `exp` of it is 0.
 
-$$
+```math
 \begin{bmatrix}
 1 & -\infty \\
 2 & 4
@@ -234,7 +234,7 @@ $$
 1 & 0 \\
 0.119 & 0.881
 \end{bmatrix}
-$$
+```
 
 Position 0 has one finite score, so its weight on itself is 1 and its new value is `1 * 1 = 1`.
 
@@ -253,7 +253,7 @@ new value 0.119203 * 1 + 0.880797 * 2 = 1.880797
 
 That weighted sum is the matrix product of the weight matrix with the value column, not a square-by-square multiply. Shape `[2, 2]` times shape `[2, 1]` is shape `[2, 1]`:
 
-$$
+```math
 \begin{bmatrix}
 1 & 0 \\
 0.119203 & 0.880797
@@ -266,7 +266,7 @@ $$
 \end{bmatrix}
 =
 \begin{bmatrix} 1 \\ 1.880797 \end{bmatrix}
-$$
+```
 
 `c_proj.weight` is `[[1]]` and `c_proj.bias` is `[0]`, so the last matrix product leaves both numbers as they are. `attn` prints `[[1.0], [1.8807970779778822]]`.
 
@@ -294,23 +294,23 @@ flowchart TB
 
 The toy here has `n_embd` 2 and `n_head` 2, so each head is one number wide. The weights copy the input into the query, the key, and the value. The input is:
 
-$$
+```math
 \begin{bmatrix}
 1 & 0 \\
 0 & 1
 \end{bmatrix}
-$$
+```
 
 Position 0's fused row is then `1, 0` three times, and position 1's fused row is `0, 1` three times. The vertical bars split query, key, and value. Inside a block, the first number is head 0 and the second number is head 1.
 
-$$
+```math
 \begin{array}{cc|cc|cc}
 q_0 & q_1 & k_0 & k_1 & v_0 & v_1 \\
 \hline
 1 & 0 & 1 & 0 & 1 & 0 \\
 0 & 1 & 0 & 1 & 0 & 1
 \end{array}
-$$
+```
 
 Reading down one head's column:
 
@@ -357,9 +357,9 @@ The arrow that skips layer norm is the residual. Attention sees the normalized c
 
 Repeated adds make the numbers grow, so each block first rescales a copy. After the rescaling, the copy has mean 0 and standard deviation about 1. Then `ln_1.weight` scales each column and `ln_1.bias` shifts each column, using the row copy from the broadcasting section. A row and that same row times ten come out almost the same, which is why the growing numbers stop being a problem. Take `[2, 4, 6, 8]`. The mean is 5. The deviations are `-3, -1, 1, 3`. The variance is the average of the squared deviations, `(9 + 1 + 1 + 9) / 4 = 5`. Dividing by `sqrt(5 + 0.00001)` gives about `-1.34, -0.45, 0.45, 1.34`. The row `[20, 40, 60, 80]` has deviations ten times larger and a variance 100 times larger, so the square root is ten times larger and the quotients match.
 
-$$
+```math
 \mathrm{layer\_norm}(x) = \frac{x - \mathrm{mean}}{\sqrt{\mathrm{variance} + 0.00001}} \cdot \mathrm{weight} + \mathrm{bias}
-$$
+```
 
 > Note. The dot in that formula is the broadcast multiply: one scale per column, copied onto every token. The matrix product used for `c_attn.weight` and the other internal weights is the other path, under What multiply does.
 
@@ -402,9 +402,9 @@ flowchart LR
 
 The GELU the tester scores is the tanh approximation. An exact GELU can differ by about `0.0005`, which is enough to fail.
 
-$$
+```math
 \mathrm{gelu}(x) = 0.5 \, x \, \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}}\left(x + 0.044715 \, x^{3}\right)\right)\right)
-$$
+```
 
 Continue the `[[1, 2]]` block. After the first residual add the row is about `[0, 3]`. `ln_2`, with weight `[1, 1]` and bias `[0, 0]`, normalizes it to about `[-1, 1]` again. The toy widen-step keeps those two numbers and fills the rest of the wide row with zeros, so GELU sees `[-1, 1, 0, 0, 0, 0, 0, 0]`. `gelu(-1)` is about `-0.1588`, `gelu(1)` is about `0.8412`, and `gelu(0)` is 0. The shrink-step puts the first two numbers back, and they are added onto `[0, 3]`:
 
