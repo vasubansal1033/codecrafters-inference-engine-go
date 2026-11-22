@@ -239,6 +239,56 @@ func (t tensor) softmax(dim int, temp float32) (tensor, error) {
 	return out, nil
 }
 
+func (t tensor) layerNorm(dim int) (tensor, error) {
+	if dim != 1 {
+		return tensor{}, fmt.Errorf("LayerNorm error: Invalid dimension %d passed for shape %v", dim, t.Shape)
+	}
+
+	// current challenge requires normalization along rows (dim=1).
+	// TODO[improvement]: handle generic case
+
+	rows, cols := t.Shape[0], t.Shape[1]
+	out := t
+	out.Values = slices.Clone(t.Values)
+	if dim == 1 {
+		for i := 0; i < rows; i++ {
+			rowStartFlatIdx, err := t.getFlatArrayIdx(i, 0)
+			if err != nil {
+				return tensor{}, fmt.Errorf("LayerNorm error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+			}
+			rowEndFlatIdx, err := t.getFlatArrayIdx(i, cols-1)
+			if err != nil {
+				return tensor{}, fmt.Errorf("LayerNorm error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+			}
+
+			/*
+				Layer Norm: Calculate mean and variance of row
+			*/
+			mean := float32(0)
+			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
+				mean += out.Values[j]
+			}
+			mean /= (float32(cols))
+
+			variance := float32(0)
+			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
+				variance += float32(math.Pow(float64(out.Values[j])-float64(mean), float64(2)))
+			}
+			variance /= float32(cols) // using unbiased variance
+			stdDev := math.Sqrt(float64(variance))
+
+			// normalize
+			eps := 1e-3 // add eps to std dev for numerical stability
+			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
+				out.Values[j] = (out.Values[j] - mean) / float32(stdDev+eps)
+			}
+		}
+	}
+
+	return out, nil
+
+}
+
 func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
 	/*
 		2, 3
