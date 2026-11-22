@@ -118,7 +118,7 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 			= (num_pos, n_embd)
 	*/
 
-	mul, err := inputTensor.multiply(layerAttnWeights)
+	mul, err := inputTensor.matmul(layerAttnWeights)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -169,7 +169,7 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 		}
 
 		// causally attended embeddings
-		headOut, err := softmaxScore.multiply(V)
+		headOut, err := softmaxScore.matmul(V)
 		if err != nil {
 			return tensor{}, err
 		}
@@ -182,7 +182,7 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 		}
 	}
 
-	mul, err = attended.multiply(layerProjWeights)
+	mul, err = attended.matmul(layerProjWeights)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -205,7 +205,7 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_1.weight", layer_num)]
 	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_1.bias", layer_num)]
 
-	layerNorm, err = layerNorm.multiply(layerNormWeights)
+	layerNorm, err = layerNorm.broadcastMultiply(layerNormWeights)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -283,7 +283,7 @@ func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (ten
 	if err != nil {
 		return tensor{}, tensor{}, err
 	}
-	qk, err := q.multiply(kT)
+	qk, err := q.matmul(kT)
 	if err != nil {
 		return tensor{}, tensor{}, err
 	}

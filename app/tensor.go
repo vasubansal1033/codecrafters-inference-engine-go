@@ -150,48 +150,50 @@ func (t1 tensor) exp() (tensor, error) {
 	return out, nil
 }
 
-func (t1 tensor) multiply(t2 tensor) (tensor, error) {
-	// Normal 2D matrix -> perform normal matrix mul
-	if len(t1.Shape) == 2 && len(t2.Shape) == 2 && t1.Shape[1] == t2.Shape[0] {
-		t1Shape, t2Shape := t1.Shape, t2.Shape
-		// mxn times nxp -> mxp
-		resRows, resCols := t1Shape[0], t2Shape[1]
-		res := tensor{
-			DType:  t1.DType, // assuming both have same DType,
-			Shape:  []int{resRows, resCols},
-			Values: make([]float32, resRows*resCols),
-		}
-
-		/*
-			res[i][j] = sum over k t1[i][k].t2[k][j]
-		*/
-		commonDim := t1Shape[1]
-		for i := 0; i < resRows; i++ {
-			for j := 0; j < resCols; j++ {
-				flatIdx, err := res.getFlatArrayIdx(i, j)
-				if err != nil {
-					return tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
-				}
-
-				for k := 0; k < commonDim; k++ {
-					t1FlatIdx, err := t1.getFlatArrayIdx(i, k)
-					if err != nil {
-						return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
-					}
-					t2FlatIdx, err := t2.getFlatArrayIdx(k, j)
-					if err != nil {
-						return tensor{}, fmt.Errorf("Multiplication error[3]: invalid shapes %v x %v", t1Shape, t2Shape)
-					}
-
-					res.Values[flatIdx] += t1.Values[t1FlatIdx] * t2.Values[t2FlatIdx]
-				}
-			}
-		}
-
-		return res, nil
+func (t1 tensor) matmul(t2 tensor) (tensor, error) {
+	t1Shape, t2Shape := t1.Shape, t2.Shape
+	// mxn times nxp -> mxp
+	if len(t1Shape) != 2 || len(t2Shape) != 2 || t1Shape[1] != t2Shape[0] {
+		return tensor{}, fmt.Errorf("Multiplication error: invalid shapes %v x %v", t1Shape, t2Shape)
 	}
 
-	// handling if both are 1D tensors
+	resRows, resCols := t1Shape[0], t2Shape[1]
+	res := tensor{
+		DType:  t1.DType, // assuming both have same DType,
+		Shape:  []int{resRows, resCols},
+		Values: make([]float32, resRows*resCols),
+	}
+
+	/*
+		res[i][j] = sum over k t1[i][k].t2[k][j]
+	*/
+	commonDim := t1Shape[1]
+	for i := 0; i < resRows; i++ {
+		for j := 0; j < resCols; j++ {
+			flatIdx, err := res.getFlatArrayIdx(i, j)
+			if err != nil {
+				return tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
+			}
+
+			for k := 0; k < commonDim; k++ {
+				t1FlatIdx, err := t1.getFlatArrayIdx(i, k)
+				if err != nil {
+					return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
+				}
+				t2FlatIdx, err := t2.getFlatArrayIdx(k, j)
+				if err != nil {
+					return tensor{}, fmt.Errorf("Multiplication error[3]: invalid shapes %v x %v", t1Shape, t2Shape)
+				}
+
+				res.Values[flatIdx] += t1.Values[t1FlatIdx] * t2.Values[t2FlatIdx]
+			}
+		}
+	}
+
+	return res, nil
+}
+
+func (t1 tensor) broadcastMultiply(t2 tensor) (tensor, error) {
 	// Shape [n] is one row. [m,n] * [n] and [m,n] * [1,n] broadcast on that row.
 	bothRank1 := len(t1.Shape) == 1 && len(t2.Shape) == 1
 	dtype := t1.DType

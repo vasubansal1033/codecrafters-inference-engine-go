@@ -99,9 +99,9 @@ position 1, id 0     wte row 0 [1, 2]  +  wpe row 1 [30, 40]  =  [31, 42]
 
 ## What multiply does
 
-> Note. GPT-2, and the models that keep this block, use two different multiplies. The internal weights (`c_attn`, `c_proj`, and the MLP matrices `c_fc` and `c_proj`) are matrix products: a row is combined with a whole matrix. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one number per column, copied onto every token and multiplied in place. Biases are the same shape of vector, added rather than multiplied. Both multiplies are handled by `multiply`.
+> Note. GPT-2, and the models that keep this block, use two different multiplies. The internal weights (`c_attn`, `c_proj`, and the MLP matrices `c_fc` and `c_proj`) are matrix products: a row is combined with a whole matrix. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one number per column, copied onto every token and multiplied in place. Biases are the same shape of vector, added rather than multiplied. `matmul` does the matrix product. `broadcastMultiply` does the per-column scale. `add` stays one function, because addition has only the broadcast.
 
-`multiply` is a matrix product whenever both tensors are already two-dimensional and the left width equals the right height. That is the multiply used for `c_attn.weight`, `c_proj.weight`, a query times a transposed key, and the attention weights times `V`. Each entry of the result is a dot product along the shared side. The result has the left tensor's height and the right tensor's width.
+`matmul` is the matrix product. That is the call used for `c_attn.weight`, `c_proj.weight`, a query times a transposed key, and the attention weights times `V`. Each entry of the result is a dot product along the shared side. The result has the left tensor's height and the right tensor's width.
 
 Take a `[2, 3]` matrix and stand the list `10, 20, 30` up as a column of shape `[3, 1]`. Inner size 3 matches inner size 3, so this is a product, and the answer is one number per row:
 
@@ -148,16 +148,11 @@ $$
 
 ```mermaid
 flowchart TD
-  start["multiply left, right"]
-  q{"Both sides already 2D,<br/>and left width equals right height?"}
-  prod["Matrix product<br/>each output entry is a dot product"]
-  broad["1D list: copy it as a row and scale each column"]
-  start --> q
-  q -->|yes| prod
-  q -->|no| broad
+  weights["internal weights: c_attn, c_proj, MLP"] --> matmul["matmul"]
+  ln["layer-norm scales: ln_1, ln_2, ln_f"] --> bcast["broadcastMultiply"]
 ```
 
-The other branch is only for a 1D list, such as `ln_1.weight`. A list has no second dimension, so the product check does not apply. The list is laid across every row, and each column is scaled by its own entry. Stored as shape `[3]`, those same numbers scale the matrix like this:
+The column scale is `broadcastMultiply`. A list has no second dimension, so it is laid across every row and each column is scaled by its own entry. Stored as shape `[3]`, those same numbers scale the matrix like this:
 
 ```text
 1  2  3      10  20  30      10   40   90
@@ -428,7 +423,7 @@ The stage prints `[[-0.15878819, 3.84116958]]`.
 | Attention says `n_pos: 4` while the matrix you loaded has 2 rows | The position count was `n_positions` from the config. The rows in this call are `inputTensor.Shape[0]`. |
 | A one-column attention result is about `1.88` on the second row | Scores 2 and 4 became weights about `0.119` and `0.881`, then `0.119 * 1 + 0.881 * 2`. That is the single-head toy. |
 | Two-head output is `[[1, 0], [0.5, 0.73]]` | Head 0 split two equal scores into `[0.5, 0.5]`. Head 1 split scores 0 and 1 into about `[0.269, 0.731]`. The divisor is `sqrt(1)`, the width of the slice. |
-| A one-token projection has the shape of the weight matrix, and each column looks scaled | `[1, n]` times `[n, n]` took the row-copy path. The product check has to see both shapes while they are still two-dimensional. |
+| A one-token projection has the shape of the weight matrix, and each column looks scaled | The projection was sent to `broadcastMultiply`. `c_proj.weight` is a matrix product, so that call is `matmul`. |
 | The block on `[[1, 2]]` prints about `[[0, 3]]` | Layer norm of `[1, 2]` is about `[-1, 1]`, one-row attention returns it, and the residual add is `[1, 2] + [-1, 1]`. |
 | That same block prints about `0.001996` in the first column | The denominator was `sqrt(variance) + eps`. The formula divides by `sqrt(variance + 0.00001)`. |
 | `[[1, 2]]` through the full block is about `[-0.159, 3.841]` | `ln_2` produced about `[-1, 1]`, GELU bent those to about `-0.1588` and `0.8412`, and that pair was added onto `[0, 3]`. `calculateBlock` stops before this path. |

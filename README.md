@@ -10,15 +10,15 @@ A tensor is a flat `[]float32` plus a shape, stored row by row. Shape `[n]` is a
 
 ## Broadcasting
 
-> Note. In GPT-2 the internal weights (`c_attn`, `c_proj`, and the MLP matrices) are matrix products. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one scale per column, multiplied onto every token. Both paths live in `multiply`. The pictures are in `concepts.md`, under What multiply does.
+> Note. In GPT-2 the internal weights (`c_attn`, `c_proj`, and the MLP matrices) are matrix products, done by `matmul`. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one scale per column, multiplied onto every token by `broadcastMultiply`. `add` is only the broadcast, so it stays one function. The pictures are in `concepts.md`, under What multiply does.
 
 GPT-2 stores several parameters as one list whose length is the embedding size: `h.{layer}.attn.c_attn.bias`, `h.{layer}.attn.c_proj.bias`, `h.{layer}.ln_1.weight`, and `h.{layer}.ln_1.bias`. A forward pass has one row per token, so the activation is `[n_pos, n_embd]`, or `[n_pos, 3*n_embd]` after the fused query, key, and value projection. The vector has to meet every row. That stretch is the broadcast.
 
-The same `multiply` function also has to compute full matrix products. `c_attn.weight` is `[n_embd, 3*n_embd]`, and the forward step is the activation times that matrix. A one-token prompt is `[1, n_embd]`. That single row is a real product with the weight, and it is also shaped like a row that broadcasting would copy. `multiply` decides which of those it is from the shapes as they were stored, before any vector is viewed as a row.
+`c_attn.weight` is `[n_embd, 3*n_embd]`, and the forward step is the activation times that matrix, through `matmul`. A one-token prompt is `[1, n_embd]`. That single row is a real product with the weight. The caller names `matmul` for that product. `broadcastMultiply` is the other function, used when the right-hand side is a per-column scale such as `ln_1.weight`.
 
 #### The shared row-repeat steps
 
-`add` and the second half of `multiply` follow the same steps. `add` uses `+=`. The broadcast half of `multiply` uses `*=`. Both methods take the receiver by value, so the rewrites below happen on a copy.
+`add` and `broadcastMultiply` follow the same steps. `add` uses `+=`. `broadcastMultiply` uses `*=`. Both methods take the receiver by value, so the rewrites below happen on a copy.
 
 1. Record whether both arguments started with a one-dimensional shape.
 2. Save the left tensor's dtype. A later swap must leave the result reporting that dtype.
@@ -33,7 +33,7 @@ The clone in step 7 is required because a value receiver copies the struct, incl
 
 `applyCausalMask` is the method that writes through that shared array on purpose. It sets `score[i][j]` to negative infinity when `j > i`, and the diagonal stays. The caller's score tensor sees those writes.
 
-#### A worked multiply of a vector
+#### A worked broadcastMultiply of a vector
 
 Left operand, shape `[2, 3]`:
 
@@ -44,7 +44,7 @@ Left operand, shape `[2, 3]`:
 
 Right operand, shape `[3]`: `10, 20, 30`.
 
-The right side has one dimension, so the matrix-product check does not apply. That check requires two dimensions on both sides. The vector is viewed as shape `[1, 3]`. The widths are both 3, and the right side has one row, so that row is copied twice:
+`broadcastMultiply` reads a shape `[3]` as one row of width 3. The widths match, and the right side has one row, so that row is copied twice:
 
 ```text
 10 20 30
@@ -64,9 +64,9 @@ The same alignment with addition produces `11, 22, 33` on the first row and `14,
 
 Two length-3 vectors, `1, 2, 3` and `4, 5, 6`, take this path as well. The arithmetic gives `4, 10, 18`, and step 8 folds the shape back to `[3]`.
 
-#### When multiply is a matrix product
+#### When the call is matmul
 
-The product path runs only when both arguments already have two dimensions and the left column count equals the right row count. The value at result row `i`, column `j` is the sum of `left[i][k] * right[k][j]` over that shared dimension. The result shape is `[left rows, right columns]`.
+`matmul` runs when the caller passes two matrices whose inner sizes match. The value at result row `i`, column `j` is the sum of `left[i][k] * right[k][j]` over that shared dimension. The result shape is `[left rows, right columns]`.
 
 A one-token case:
 
@@ -82,17 +82,15 @@ The right-hand matrix is:
 5 6
 ```
 
-The inner sizes match, so this is a product even though the left side has a single row. The result is `1*3 + 2*5 = 13` and `1*4 + 2*6 = 16`, with shape `[1, 2]`.
-
-This pair also satisfies the row-repeat rule: the rows have the same width, and one side has a single row. The product check runs first, while both tensors are still two-dimensional, so a one-token prompt times `c_proj.weight` (shape `[n_embd, n_embd]`) stays a matrix product.
+The inner sizes match, so `matmul` returns `1*3 + 2*5 = 13` and `1*4 + 2*6 = 16`, with shape `[1, 2]`. A one-token prompt times `c_proj.weight` (shape `[n_embd, n_embd]`) is this call. The rows have the same width and one side has a single row, which is also a legal input to `broadcastMultiply`, so the caller has to pick `matmul` for the projection.
 
 #### Where each call lands in the block
 
 `calculateBlock` normalizes each input row, multiplies by `ln_1.weight`, adds `ln_1.bias`, runs attention on those rows, and adds the attention output onto the row it started from.
 
-- `ln_1.weight` has shape `[n_embd]`. `multiply` broadcasts it across the normalized rows.
+- `ln_1.weight` has shape `[n_embd]`. `broadcastMultiply` scales each column of the normalized rows.
 - `ln_1.bias`, `c_attn.bias`, and `c_proj.bias` are vectors. `add` broadcasts each one across rows.
-- `input * c_attn.weight`, `attended * c_proj.weight`, `Q * K^T`, and the softmax scores times `V` are two-dimensional with matching inner sizes. `multiply` computes a matrix product for each of them.
+- `input` times `c_attn.weight`, `attended` times `c_proj.weight`, `Q` times `K` transposed, and the softmax scores times `V` are `matmul` calls.
 
 `layerNorm` works per row. It subtracts the row mean and divides by the square root of (the mean of squared deviations plus `1e-5`). The mean of those squared deviations divides by the row length. The comment on that line calls the variance unbiased; the divisor in the code is the row length. Gamma and beta are applied afterwards, by the broadcast multiply and the broadcast add, so they sit outside `layerNorm`.
 
@@ -133,9 +131,9 @@ curl -L -o model.safetensors https://huggingface.co/openai-community/gpt2/resolv
 
 | What you see | What is causing it |
 | --- | --- |
-| `Multiplication error: invalid shapes [2 3] x [2 2]` | The inner sizes are 3 and 2, so there is no matrix product. The broadcast path then requires equal row widths, and 3 does not equal 2. |
+| `Multiplication error: invalid shapes [2 3] x [2 2]` | `matmul` was called with inner sizes 3 and 2. |
 | `Addition error: invalid shapes [2 3] + [4]` | After `[4]` is viewed as `[1, 4]`, the row widths are 3 and 4. `add` has no second interpretation of the shapes. |
-| A one-token projection comes out shaped like the weight matrix, with each column scaled | `[1, n_embd]` times `[n_embd, n_embd]` took the row-repeat path. The product check has to see both shapes while they are still two-dimensional. |
-| The tensor passed into `add` or into a broadcast `multiply` has different values afterwards | The result wrote into `Values` without cloning. The copied slice header still points at the caller's array. |
+| A one-token projection comes out shaped like the weight matrix, with each column scaled | The projection was sent to `broadcastMultiply`. `c_proj.weight` is a matrix product, so that call is `matmul`. |
+| The tensor passed into `add` or into `broadcastMultiply` has different values afterwards | The result wrote into `Values` without cloning. The copied slice header still points at the caller's array. |
 | Layer-norm of `[[1, 2]]` is about `0.00199598` in the first column | The denominator was `sqrt(variance) + eps`. `layerNorm` now divides by `sqrt(variance + 1e-5)`. |
 | `invalid dims provided: [2 6], whereas n_pos: 4` | The position count was `n_positions` from the config. A two-row prompt has to use `inputTensor.Shape[0]`, which `calculateAttention` does. |
