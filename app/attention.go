@@ -242,6 +242,10 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 	return resOutput, nil
 }
 
+func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tensor) (tensor, error) {
+	return tensor{}, fmt.Errorf("Logit calculation not implemented yet")
+}
+
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
 // In MHA performs calculation for Qh, Kh, Vh
 func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (tensor, tensor, error) {
