@@ -243,7 +243,66 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 }
 
 func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tensor) (tensor, error) {
-	return tensor{}, fmt.Errorf("Logit calculation not implemented yet")
+	attendedEmbeddings := tensor{}
+	for i := range config.NumberOfLayers {
+		a, err := calculateBlock(tmap, config, i, inputTensor)
+		if err != nil {
+			return tensor{}, err
+		}
+
+		attendedEmbeddings = a
+	}
+
+	embdLength := inputTensor.Shape[1]
+	lastAttendedEmbeddingStart := len(inputTensor.Values) - embdLength
+	lastAttendedEmbedding := tensor{
+		DType:  attendedEmbeddings.DType,
+		Shape:  []int{1, embdLength},
+		Values: attendedEmbeddings.Values[lastAttendedEmbeddingStart:],
+	}
+
+	// apply last layer's layer norm
+	lastAttendedEmbedding, err := lastAttendedEmbedding.layerNorm(1)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	layerNormWeights := tmap["ln_f.weight"]
+	layerNormBias := tmap["ln_f.bias"]
+
+	lastAttendedEmbedding, err = lastAttendedEmbedding.broadcastMultiply(layerNormWeights)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	lastAttendedEmbedding, err = lastAttendedEmbedding.add(layerNormBias)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	/*
+		for each token t:
+		    logit[t] = dot(last, row t of wte.weight)
+
+		last -> (1, n_embd)
+		wte.weight -> (num_pos, n_embd)
+
+		dot prod. logits = last x (wte.weight).Tranpose
+		(1, num_pos)
+	*/
+
+	wteWeight := tmap["wte.weight"]
+	wteWeight, err = wteWeight.transpose()
+	if err != nil {
+		return tensor{}, err
+	}
+
+	logits, err := lastAttendedEmbedding.matmul(wteWeight)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	return logits, nil
 }
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
