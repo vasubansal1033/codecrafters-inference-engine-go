@@ -17,6 +17,10 @@ func New(configData []byte, weights map[string]tensor.Tensor) (*Model, error) {
 	if err := json.Unmarshal(configData, &config); err != nil {
 		return nil, err
 	}
+	// Avoiding a constant row divide by zero in test stages.
+	if config.LayerNormEpsilon == 0 {
+		config.LayerNormEpsilon = 1e-5
+	}
 	return &Model{config: config, weights: weights}, nil
 }
 

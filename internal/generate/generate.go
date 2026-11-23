@@ -2,8 +2,8 @@
 package generate
 
 import (
+	"cmp"
 	"fmt"
-	"math/rand"
 	"slices"
 
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models"
@@ -29,10 +29,13 @@ func Greedy(model models.Model, ids []int, count int) ([]int, error) {
 	return generated, nil
 }
 
-func TopP(model models.Model, ids []int, count int, temperature float32, topP float32) ([]int, error) {
+func TopP(model models.Model, ids []int, count int, temperature float32, topP float32, random []float64) ([]int, error) {
+	if len(random) != count {
+		return nil, fmt.Errorf("top-p sampling: expected %d random numbers, got %d", count, len(random))
+	}
 	context := slices.Clone(ids)
 	generated := make([]int, 0, count)
-	for range count {
+	for step := range count {
 		input, err := model.Embed(context)
 		if err != nil {
 			return nil, err
@@ -47,7 +50,7 @@ func TopP(model models.Model, ids []int, count int, temperature float32, topP fl
 			return nil, err
 		}
 
-		topPSampledIdx, err := topPSample(probs, topP)
+		topPSampledIdx, err := topPSample(probs, topP, random[step])
 		if err != nil {
 			return nil, err
 		}
@@ -63,9 +66,9 @@ type tokenProb struct {
 	prob  float32
 }
 
-func topPSample(probs tensor.Tensor, topP float32) (int, error) {
-	if topP > 1 {
-		return -1, fmt.Errorf("Top P sampling error: Invalid topP %d provided\n", topP)
+func topPSample(probs tensor.Tensor, topP float32, random float64) (int, error) {
+	if topP <= 0 || topP > 1 {
+		return -1, fmt.Errorf("top-p sampling: topP must be in (0, 1], got %v", topP)
 	}
 
 	numSamples := probs.Shape[1]
@@ -77,36 +80,34 @@ func topPSample(probs tensor.Tensor, topP float32) (int, error) {
 		}
 	}
 
-	// sort in decreasing order
+	// Higher probability first. Equal probabilities stay in id order.
 	slices.SortFunc(sampleArray, func(x, y tokenProb) int {
-		if x.prob == y.prob {
-			return 0
-		}
 		if x.prob > y.prob {
+			return -1
+		}
+		if x.prob < y.prob {
 			return 1
 		}
-		return -1
+		return cmp.Compare(x.index, y.index)
 	})
 
-	cumProb := float32(0)
+	cumProb := float64(0)
 	thresholdIdx := numSamples
-	for i := 0; i < numSamples; i++ {
-		cumProb += sampleArray[i].prob
-		if cumProb > topP {
-			thresholdIdx = numSamples
+	for i, sample := range sampleArray {
+		cumProb += float64(sample.prob)
+		if cumProb >= float64(topP) {
+			thresholdIdx = i + 1
 			break
 		}
 	}
 
-	nucleus := sampleArray[:thresholdIdx+1]
-	r := rand.Float32() * cumProb // insted of normalizing nucleus
-	runProb := float32(0)
-	for i := 0; i < len(nucleus); i++ {
-		runProb += nucleus[i].prob
-		if runProb <= r {
-			return nucleus[i].index, nil
+	nucleus := sampleArray[:thresholdIdx]
+	cum := 0.0
+	for _, sample := range nucleus {
+		cum += float64(sample.prob) / cumProb
+		if cum > random {
+			return sample.index, nil
 		}
 	}
-
-	return nucleus[thresholdIdx-1].index, nil
+	return nucleus[len(nucleus)-1].index, nil
 }

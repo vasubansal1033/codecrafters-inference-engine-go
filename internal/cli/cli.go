@@ -2,12 +2,14 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/generate"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models"
@@ -177,11 +179,44 @@ func runGenerate(args []string, output io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("Error while loading token configs: %w", err)
 	}
-	result, err := generate.Greedy(model, ids, config.Count)
+
+	result := []int{}
+	if config.Temperature != 0 {
+		random, readErr := readRandom(os.Stdin, config.Count)
+		if readErr != nil {
+			return fmt.Errorf("Error while reading random numbers: %w", readErr)
+		}
+		result, err = generate.TopP(model, ids, config.Count, config.Temperature, config.TopP, random)
+	} else {
+		result, err = generate.Greedy(model, ids, config.Count)
+	}
 	if err != nil {
 		return fmt.Errorf("Error while performing generation: %w", err)
 	}
 	return writeJSON(output, result)
+}
+
+func readRandom(input io.Reader, count int) ([]float64, error) {
+	scanner := bufio.NewScanner(input)
+	values := make([]float64, 0, count)
+	for len(values) < count && scanner.Scan() {
+		text := strings.TrimSpace(scanner.Text())
+		if text == "" {
+			continue
+		}
+		value, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(values) != count {
+		return nil, fmt.Errorf("expected %d random numbers on stdin, got %d", count, len(values))
+	}
+	return values, nil
 }
 
 type tokenConfig struct {
