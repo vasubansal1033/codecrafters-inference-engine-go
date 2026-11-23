@@ -39,9 +39,10 @@ func embedTokenIds(tmap map[string]tensor, tokenIds []int) (tensor, error) {
 	}
 
 	n_embd := len(embedding) / numTokenIds
+
 	return tensor{
 		DType:  "F32",
-		Shape:  []int{n_embd, numTokenIds},
+		Shape:  []int{numTokenIds, n_embd},
 		Values: embedding,
 	}, nil
 }
