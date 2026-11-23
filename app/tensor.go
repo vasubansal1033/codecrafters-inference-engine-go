@@ -15,7 +15,11 @@ type tensor struct {
 
 // TODO[improvement]: current implementations work only for 2D tensors
 func (t1 tensor) add(t2 tensor) (tensor, error) {
-	// Shape [n] is one row. [m,n] + [n] and [m,n] + [1,n] broadcast on that row.
+	return t1.broadcastBinary(t2, func(a, b float32) float32 { return a + b }, "Addition", "+")
+}
+
+func (t1 tensor) broadcastBinary(t2 tensor, op func(float32, float32) float32, opName, symbol string) (tensor, error) {
+	// Shape [n] is one row. [m,n] with [n] or [1,n] broadcasts on that row.
 	bothRank1 := len(t1.Shape) == 1 && len(t2.Shape) == 1
 	dtype := t1.DType
 	if len(t1.Shape) == 1 {
@@ -27,7 +31,7 @@ func (t1 tensor) add(t2 tensor) (tensor, error) {
 
 	t1Shape, t2Shape := t1.Shape, t2.Shape
 	if len(t1Shape) != 2 || len(t2Shape) != 2 || t1Shape[1] != t2Shape[1] || (t1Shape[0] != t2Shape[0] && t1Shape[0] != 1 && t2Shape[0] != 1) {
-		return tensor{}, fmt.Errorf("Addition error: invalid shapes %v + %v", t1Shape, t2Shape)
+		return tensor{}, fmt.Errorf("%s error: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
 	}
 	if t1Shape[0] == 1 && t2Shape[0] != 1 {
 		t1, t2 = t2, t1
@@ -50,14 +54,14 @@ func (t1 tensor) add(t2 tensor) (tensor, error) {
 		for j := 0; j < t2Shape[1]; j++ {
 			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Addition error[1]: invalid shapes %v + %v", t1Shape, t2Shape)
+				return tensor{}, fmt.Errorf("%s error[1]: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
 			}
 			t2FlatIdx, err := t2.getFlatArrayIdx(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Addition error[2]: invalid shapes %v + %v", t1Shape, t2Shape)
+				return tensor{}, fmt.Errorf("%s error[2]: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
 			}
 
-			out.Values[t1FlatIdx] += t2.Values[t2FlatIdx]
+			out.Values[t1FlatIdx] = op(t1.Values[t1FlatIdx], t2.Values[t2FlatIdx])
 		}
 	}
 	if bothRank1 {
@@ -194,56 +198,7 @@ func (t1 tensor) matmul(t2 tensor) (tensor, error) {
 }
 
 func (t1 tensor) broadcastMultiply(t2 tensor) (tensor, error) {
-	// Shape [n] is one row. [m,n] * [n] and [m,n] * [1,n] broadcast on that row.
-	bothRank1 := len(t1.Shape) == 1 && len(t2.Shape) == 1
-	dtype := t1.DType
-	if len(t1.Shape) == 1 {
-		t1.Shape = []int{1, t1.Shape[0]}
-	}
-	if len(t2.Shape) == 1 {
-		t2.Shape = []int{1, t2.Shape[0]}
-	}
-
-	t1Shape, t2Shape := t1.Shape, t2.Shape
-	if len(t1Shape) != 2 || len(t2Shape) != 2 || t1Shape[1] != t2Shape[1] || (t1Shape[0] != t2Shape[0] && t1Shape[0] != 1 && t2Shape[0] != 1) {
-		return tensor{}, fmt.Errorf("Multiplication error: invalid shapes %v x %v", t1Shape, t2Shape)
-	}
-	if t1Shape[0] == 1 && t2Shape[0] != 1 {
-		t1, t2 = t2, t1
-		t1Shape, t2Shape = t1.Shape, t2.Shape
-	}
-	if t2Shape[0] == 1 && t1Shape[0] != 1 {
-		repeated := make([]float32, t1Shape[0]*t1Shape[1])
-		for i := 0; i < t1Shape[0]; i++ {
-			copy(repeated[i*t1Shape[1]:(i+1)*t1Shape[1]], t2.Values)
-		}
-		t2 = tensor{DType: t2.DType, Shape: []int{t1Shape[0], t1Shape[1]}, Values: repeated}
-		t2Shape = t2.Shape
-	}
-
-	out := t1
-	out.DType = dtype
-	out.Shape = []int{t1Shape[0], t1Shape[1]}
-	out.Values = slices.Clone(t1.Values)
-	for i := 0; i < t1Shape[0]; i++ {
-		for j := 0; j < t2Shape[1]; j++ {
-			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
-			if err != nil {
-				return tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
-			}
-			t2FlatIdx, err := t2.getFlatArrayIdx(i, j)
-			if err != nil {
-				return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
-			}
-
-			out.Values[t1FlatIdx] *= t2.Values[t2FlatIdx]
-		}
-	}
-	if bothRank1 {
-		out.Shape = []int{t1Shape[1]}
-	}
-
-	return out, nil
+	return t1.broadcastBinary(t2, func(a, b float32) float32 { return a * b }, "Multiplication", "x")
 }
 
 func (t tensor) softmax(dim int, temp float32) (tensor, error) {
