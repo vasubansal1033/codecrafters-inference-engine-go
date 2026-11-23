@@ -185,7 +185,9 @@ func runGenerate(args []string, output io.Writer) error {
 }
 
 type tokenConfig struct {
-	Count int `json:"count"`
+	Count       int     `json:"count"`
+	Temperature float32 `json:"temperature"`
+	TopP        float32 `json:"top_p"`
 }
 
 func loadInputRows(path string) (tensor.Tensor, error) {
