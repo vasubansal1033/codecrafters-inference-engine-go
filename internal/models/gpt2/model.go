@@ -40,10 +40,6 @@ type GPT2Config struct {
 	VocabularySize         int                    `json:"vocab_size"`
 }
 
-type TokenConfig struct {
-	Count int `json:"count"`
-}
-
 func LoadConfig(path string) (GPT2Config, error) {
 	return readJSON[GPT2Config](path)
 }
@@ -68,10 +64,6 @@ func LoadInputRows(path string) (tensorpkg.Tensor, error) {
 	}
 
 	return inputTensor, nil
-}
-
-func LoadTokenConfig(path string) (TokenConfig, error) {
-	return readJSON[TokenConfig](path)
 }
 
 func readJSON[T any](path string) (T, error) {
@@ -286,27 +278,6 @@ func CalculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputT
 	}
 
 	return logits, nil
-}
-
-func PerformGeneration(tmap map[string]tensorpkg.Tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensorpkg.Tensor) ([]int, error) {
-
-	generatedIds := []int{}
-	for range tokenConfig.Count {
-		logits, err := CalculateLogits(tmap, config, inputTensor)
-		if err != nil {
-			return []int{}, err
-		}
-
-		maxLogitIdx := slices.Index(logits.Values, slices.Max(logits.Values))
-		generatedIds = append(generatedIds, maxLogitIdx)
-		inputTensor, err = addTokenIdEmbedding(tmap, inputTensor, maxLogitIdx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return generatedIds, nil
-
 }
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V

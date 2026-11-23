@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/generate"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
@@ -160,7 +161,7 @@ func TestRealModelLogitsAndGenerate(t *testing.T) {
 	if len(logits.Values) != config.VocabularySize {
 		t.Fatalf("logits length = %d, want %d", len(logits.Values), config.VocabularySize)
 	}
-	generated, err := gpt2.PerformGeneration(weights, config, gpt2.TokenConfig{Count: 1}, input)
+	generated, err := generate.Greedy(model, []int{464, 3139, 286, 4881, 318}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

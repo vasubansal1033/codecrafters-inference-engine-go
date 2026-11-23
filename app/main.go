@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/generate"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
@@ -238,7 +239,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := gpt2.LoadConfig(configPath)
+		model, err := models.Load(configPath, tensors)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
@@ -250,23 +251,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		tokenConfig, err := gpt2.LoadTokenConfig(tokenConfigPath)
+		tokenConfig, err := loadTokenConfig(tokenConfigPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading token configs: %s\n", err)
 			os.Exit(1)
 		}
 
-		inputTensor, err := gpt2.EmbedTokenIDs(tensors, tokenIds)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
-			os.Exit(1)
-		}
-
-		generatedOutput, err := gpt2.PerformGeneration(
-			tensors,
-			config,
-			tokenConfig,
-			inputTensor)
+		generatedOutput, err := generate.Greedy(model, tokenIds, tokenConfig.Count)
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while performing generation: %s\n", err)

@@ -3,7 +3,6 @@ package gpt2
 import (
 	"fmt"
 	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
-	"slices"
 )
 
 /*
@@ -43,34 +42,6 @@ func EmbedTokenIDs(tmap map[string]tensorpkg.Tensor, tokenIds []int) (tensorpkg.
 		DType:  "F32",
 		Shape:  []int{numTokenIds, numEmbeddings},
 		Values: embedding,
-	}, nil
-}
-
-func addTokenIdEmbedding(tmap map[string]tensorpkg.Tensor, inputTensor tensorpkg.Tensor, tokenId int) (tensorpkg.Tensor, error) {
-	numTokenIds := inputTensor.Shape[0]
-	numEmbeddings := inputTensor.Shape[1]
-
-	tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-	posEmbedding, err := getEmbeddingFromTensorValues(tmap["wpe.weight"], numTokenIds)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-
-	// merge the two embeddings
-	mergedEmbedding, err := mergeTokenAndPosEmbeddings(tokenEmbedding, posEmbedding)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-
-	values := append(slices.Clone(inputTensor.Values), mergedEmbedding...)
-
-	return tensorpkg.Tensor{
-		DType:  "F32",
-		Shape:  []int{numTokenIds + 1, numEmbeddings},
-		Values: values,
 	}, nil
 }
 
