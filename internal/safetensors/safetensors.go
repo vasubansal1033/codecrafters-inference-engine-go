@@ -1,4 +1,4 @@
-package main
+package safetensors
 
 import (
 	"encoding/binary"
@@ -24,8 +24,8 @@ var dtypeDecoders = map[string]dtypeDecoder{
 	}},
 }
 
-// loadTensors reads every tensor in a safetensors file, with all of its numbers.
-func loadTensors(path string) (map[string]tensorpkg.Tensor, error) {
+// Load reads every tensor in a safetensors file, with all of its numbers.
+func Load(path string) (map[string]tensorpkg.Tensor, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

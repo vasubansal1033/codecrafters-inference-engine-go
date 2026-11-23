@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
 	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"math"
 	"os"
@@ -131,7 +132,7 @@ func TestRealModelLogitsAndGenerate(t *testing.T) {
 	if modelPath == "" {
 		t.Skip("set GPT2_MODEL to run the real-model regression")
 	}
-	weights, err := loadTensors(modelPath)
+	weights, err := safetensors.Load(modelPath)
 	if err != nil {
 		t.Fatal(err)
 	}

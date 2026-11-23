@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
 	"os"
 	"sort"
 	"strconv"
@@ -17,7 +18,7 @@ func main() {
 
 	switch command := os.Args[1]; command {
 	case "inspect":
-		tensors, err := loadTensors(os.Args[2])
+		tensors, err := safetensors.Load(os.Args[2])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
@@ -53,7 +54,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		tensors, err := loadTensors(os.Args[2])
+		tensors, err := safetensors.Load(os.Args[2])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
@@ -86,7 +87,7 @@ func main() {
 		layerNumInput := os.Args[4]
 		inputsPath := os.Args[5]
 
-		tensors, err := loadTensors(modelPath)
+		tensors, err := safetensors.Load(modelPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
@@ -138,7 +139,7 @@ func main() {
 		layerNumInput := os.Args[4]
 		inputsPath := os.Args[5]
 
-		tensors, err := loadTensors(modelPath)
+		tensors, err := safetensors.Load(modelPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
@@ -189,7 +190,7 @@ func main() {
 		configPath := os.Args[3]
 		idsPath := os.Args[4]
 
-		tensors, err := loadTensors(modelPath)
+		tensors, err := safetensors.Load(modelPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
@@ -240,7 +241,7 @@ func main() {
 		idsPath := os.Args[4]
 		tokenConfigPath := os.Args[5]
 
-		tensors, err := loadTensors(modelPath)
+		tensors, err := safetensors.Load(modelPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
