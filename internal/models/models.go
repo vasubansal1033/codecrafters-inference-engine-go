@@ -37,6 +37,9 @@ func Load(configPath string, weights map[string]tensor.Tensor) (Model, error) {
 	if err := json.Unmarshal(config, &metadata); err != nil {
 		return nil, err
 	}
+	if metadata.ModelType == "" {
+		metadata.ModelType = "gpt2"
+	}
 	builder, ok := builders[metadata.ModelType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported model_type %q", metadata.ModelType)
