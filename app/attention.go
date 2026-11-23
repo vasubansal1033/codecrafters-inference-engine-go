@@ -106,13 +106,37 @@ func layerNormAffine(input, weights, bias tensor, eps float32) (tensor, error) {
 	return output.add(bias)
 }
 
-func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
-	// fmt.Printf("config: %v\nlayerNum: %d\ninputs: %v", config, layerNum, inputs)
+type layerWeights struct {
+	attnWeight, attnBias tensor
+	attnProjWeight       tensor
+	attnProjBias         tensor
+	ln1Weight, ln1Bias   tensor
+	ln2Weight, ln2Bias   tensor
+	mlpWeight, mlpBias   tensor
+	mlpProjWeight        tensor
+	mlpProjBias          tensor
+}
 
-	layerAttnWeights := tmap[fmt.Sprintf("h.%d.attn.c_attn.weight", layerNum)]
-	layerAttnBias := tmap[fmt.Sprintf("h.%d.attn.c_attn.bias", layerNum)]
-	layerProjWeights := tmap[fmt.Sprintf("h.%d.attn.c_proj.weight", layerNum)]
-	layerProjBias := tmap[fmt.Sprintf("h.%d.attn.c_proj.bias", layerNum)]
+func weightsForLayer(tmap map[string]tensor, layer int) layerWeights {
+	prefix := fmt.Sprintf("h.%d.", layer)
+	return layerWeights{
+		attnWeight:     tmap[prefix+"attn.c_attn.weight"],
+		attnBias:       tmap[prefix+"attn.c_attn.bias"],
+		attnProjWeight: tmap[prefix+"attn.c_proj.weight"],
+		attnProjBias:   tmap[prefix+"attn.c_proj.bias"],
+		ln1Weight:      tmap[prefix+"ln_1.weight"],
+		ln1Bias:        tmap[prefix+"ln_1.bias"],
+		ln2Weight:      tmap[prefix+"ln_2.weight"],
+		ln2Bias:        tmap[prefix+"ln_2.bias"],
+		mlpWeight:      tmap[prefix+"mlp.c_fc.weight"],
+		mlpBias:        tmap[prefix+"mlp.c_fc.bias"],
+		mlpProjWeight:  tmap[prefix+"mlp.c_proj.weight"],
+		mlpProjBias:    tmap[prefix+"mlp.c_proj.bias"],
+	}
+}
+
+func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
+	weights := weightsForLayer(tmap, layerNum)
 
 	/*
 		TENSOR CALCULATION:
@@ -137,7 +161,7 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int,
 			= (num_pos, n_embd)
 	*/
 
-	add, err := linear(inputTensor, layerAttnWeights, layerAttnBias)
+	add, err := linear(inputTensor, weights.attnWeight, weights.attnBias)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -195,7 +219,7 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int,
 		}
 	}
 
-	res, err := linear(attended, layerProjWeights, layerProjBias)
+	res, err := linear(attended, weights.attnProjWeight, weights.attnProjBias)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -204,11 +228,8 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int,
 }
 
 func calculateBlock(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
-	// apply layer norm-1 wandb
-	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_1.weight", layerNum)]
-	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_1.bias", layerNum)]
-
-	layerNorm, err := layerNormAffine(inputTensor, layerNormWeights, layerNormBias, config.LayerNormEpsilon)
+	weights := weightsForLayer(tmap, layerNum)
+	layerNorm, err := layerNormAffine(inputTensor, weights.ln1Weight, weights.ln1Bias, config.LayerNormEpsilon)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -377,20 +398,14 @@ func calculateScore(t tensor, numPositions int, numEmbeddings int, numHeads int,
 }
 
 func performMLP(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
-	// apply layer norm-2 wandb
-	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_2.weight", layerNum)]
-	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_2.bias", layerNum)]
-
-	layerNormOutput, err := layerNormAffine(inputTensor, layerNormWeights, layerNormBias, config.LayerNormEpsilon)
+	weights := weightsForLayer(tmap, layerNum)
+	layerNormOutput, err := layerNormAffine(inputTensor, weights.ln2Weight, weights.ln2Bias, config.LayerNormEpsilon)
 	if err != nil {
 		return tensor{}, err
 	}
 
 	// apply MLP weights
-	mlpWeights := tmap[fmt.Sprintf("h.%d.mlp.c_fc.weight", layerNum)]
-	mlpBias := tmap[fmt.Sprintf("h.%d.mlp.c_fc.bias", layerNum)]
-
-	mlpOutput, err := linear(layerNormOutput, mlpWeights, mlpBias)
+	mlpOutput, err := linear(layerNormOutput, weights.mlpWeight, weights.mlpBias)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -401,10 +416,7 @@ func performMLP(tmap map[string]tensor, config GPT2Config, layerNum int, inputTe
 	}
 
 	// apply MLP projection
-	mlpProjWeights := tmap[fmt.Sprintf("h.%d.mlp.c_proj.weight", layerNum)]
-	mlpProjBias := tmap[fmt.Sprintf("h.%d.mlp.c_proj.bias", layerNum)]
-
-	mlpOutput, err = linear(mlpOutput, mlpProjWeights, mlpProjBias)
+	mlpOutput, err = linear(mlpOutput, weights.mlpProjWeight, weights.mlpProjBias)
 	if err != nil {
 		return tensor{}, err
 	}
