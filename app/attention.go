@@ -43,6 +43,10 @@ type GPT2Config struct {
 	VocabularySize         int                    `json:"vocab_size"`
 }
 
+type TokenConfig struct {
+	Count int `json:"count"`
+}
+
 func loadConfig(path string) (GPT2Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -90,6 +94,24 @@ func loadInputRows(path string) (tensor, error) {
 	}
 
 	return inputTensor, nil
+}
+
+func loadTokenConfig(path string) (TokenConfig, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return TokenConfig{}, err
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	decoder := json.NewDecoder(reader)
+
+	var tokenConfig TokenConfig
+	if err := decoder.Decode(&tokenConfig); err != nil {
+		return TokenConfig{}, err
+	}
+
+	return tokenConfig, nil
 }
 
 func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
@@ -309,6 +331,10 @@ func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tens
 	}
 
 	return logits, nil
+}
+
+func performGeneration(tmap map[string]tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensor) (tensor, error) {
+	return tensor{}, fmt.Errorf("Generation not implemented yet")
 }
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
