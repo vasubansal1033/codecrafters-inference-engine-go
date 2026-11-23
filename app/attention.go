@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 )
 
 const (
@@ -243,9 +244,14 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 }
 
 func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tensor) (tensor, error) {
-	attendedEmbeddings := tensor{}
+	attendedEmbeddings := tensor{
+		DType:  inputTensor.DType,
+		Shape:  inputTensor.Shape,
+		Values: slices.Clone(inputTensor.Values),
+	}
+
 	for i := range config.NumberOfLayers {
-		a, err := calculateBlock(tmap, config, i, inputTensor)
+		a, err := calculateBlock(tmap, config, i, attendedEmbeddings)
 		if err != nil {
 			return tensor{}, err
 		}
