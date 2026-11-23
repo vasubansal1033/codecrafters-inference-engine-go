@@ -410,7 +410,7 @@ func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (ten
 	}
 	// Dot is over key_dim = n_embd/n_heads.
 	dK := float32(head_dim)
-	res, err := qk.scalerMultiply(1 / float32(math.Sqrt(float64(dK))))
+	res, err := qk.scale(1 / float32(math.Sqrt(float64(dK))))
 	return res, v, err
 }
 

@@ -71,7 +71,7 @@ func (t1 tensor) broadcastBinary(t2 tensor, op func(float32, float32) float32, o
 	return out, nil
 }
 
-func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
+func (t1 tensor) mapValues(opName string, f func(float32) float32) (tensor, error) {
 	rank1 := len(t1.Shape) == 1
 	if rank1 {
 		t1.Shape = []int{1, t1.Shape[0]}
@@ -83,10 +83,9 @@ func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
 		for j := 0; j < t1Shape[1]; j++ {
 			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Scale error[1]: invalid shapes %v", t1Shape)
+				return tensor{}, fmt.Errorf("%s error[1]: invalid shapes %v", opName, t1Shape)
 			}
-
-			out.Values[t1FlatIdx] *= n
+			out.Values[t1FlatIdx] = f(t1.Values[t1FlatIdx])
 		}
 	}
 	if rank1 {
@@ -94,6 +93,10 @@ func (t1 tensor) scalerMultiply(n float32) (tensor, error) {
 	}
 
 	return out, nil
+}
+
+func (t1 tensor) scale(n float32) (tensor, error) {
+	return t1.mapValues("Scale", func(value float32) float32 { return value * n })
 }
 
 func (t tensor) transpose() (tensor, error) {
@@ -130,28 +133,9 @@ func (t tensor) transpose() (tensor, error) {
 }
 
 func (t1 tensor) exp() (tensor, error) {
-	rank1 := len(t1.Shape) == 1
-	if rank1 {
-		t1.Shape = []int{1, t1.Shape[0]}
-	}
-	t1Shape := t1.Shape
-	out := t1
-	out.Values = slices.Clone(t1.Values)
-	for i := 0; i < t1Shape[0]; i++ {
-		for j := 0; j < t1Shape[1]; j++ {
-			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
-			if err != nil {
-				return tensor{}, fmt.Errorf("Scale error[1]: invalid shapes %v", t1Shape)
-			}
-
-			out.Values[t1FlatIdx] = float32(math.Exp(float64(t1.Values[t1FlatIdx])))
-		}
-	}
-	if rank1 {
-		out.Shape = []int{t1Shape[1]}
-	}
-
-	return out, nil
+	return t1.mapValues("Exp", func(value float32) float32 {
+		return float32(math.Exp(float64(value)))
+	})
 }
 
 func (t1 tensor) matmul(t2 tensor) (tensor, error) {
