@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/models"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
 	"os"
@@ -94,7 +95,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := gpt2.LoadConfig(configPath)
+		model, err := models.Load(configPath, tensors)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
@@ -112,11 +113,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		attn, err := gpt2.CalculateAttention(
-			tensors,
-			config,
-			layerNum,
-			inputTensor)
+		attn, err := model.Attention(layerNum, inputTensor)
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while calculating attention: %s\n", err)
@@ -146,7 +143,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := gpt2.LoadConfig(configPath)
+		model, err := models.Load(configPath, tensors)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
@@ -164,11 +161,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		block, err := gpt2.CalculateBlock(
-			tensors,
-			config,
-			layerNum,
-			inputTensor)
+		block, err := model.Block(layerNum, inputTensor)
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while calculating block: %s\n", err)
@@ -197,7 +190,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := gpt2.LoadConfig(configPath)
+		model, err := models.Load(configPath, tensors)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
@@ -209,16 +202,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		inputTensor, err := gpt2.EmbedTokenIDs(tensors, tokenIds)
+		inputTensor, err := model.Embed(tokenIds)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
 			os.Exit(1)
 		}
 
-		logits, err := gpt2.CalculateLogits(
-			tensors,
-			config,
-			inputTensor)
+		logits, err := models.Logits(model, inputTensor)
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while calculating logits: %s\n", err)

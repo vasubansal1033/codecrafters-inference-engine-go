@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/models"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
 	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
@@ -148,7 +149,11 @@ func TestRealModelLogitsAndGenerate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logits, err := gpt2.CalculateLogits(weights, config, input)
+	model, err := models.Load(filepath.Join(filepath.Dir(modelPath), "config.json"), weights)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logits, err := models.Logits(model, input)
 	if err != nil {
 		t.Fatal(err)
 	}
