@@ -1,4 +1,4 @@
-These notes follow the stages this repository already implements: the weight file, embeddings, one attention head, many heads, then layer norm and the residual add. Every example is small enough to finish on paper. The byte layout was checked against `app/safetensors.go`. The arithmetic was checked against the stage examples and against `app/embed.go`, `app/attention.go`, and `app/tensor.go` on 22 November 2026. The matching Go for the row-copy lives in `README.md`, under Broadcasting.
+These notes follow the stages this repository implements: the weight file, embeddings, one attention head, many heads, layer normalization, and the complete transformer block. Every example is small enough to finish on paper. The byte layout lives in `internal/safetensors`. Tensor arithmetic lives in `internal/tensor`, reusable layers live in `internal/nn`, and GPT-2's forward pass lives in `internal/models/gpt2`.
 
 ## The file of weights
 
@@ -70,7 +70,7 @@ model.safetensors
 └── ln_f.bias
 ```
 
-Twelve tables under each `h.N` are learned weights. Attention uses `c_attn`, `c_proj`, and `ln_1`. The wide middle of the block uses `ln_2` and `mlp`. The thirteenth table, in the usual Hugging Face export, is `h.N.attn.bias`, a causal mask stored as data. This engine builds that mask in `applyCausalMask` and leaves the stored table unread. The 548 MB file was not opened to confirm the name. The count of 13 comes from the stage text.
+Twelve tables under each `h.N` are learned weights. Attention uses `c_attn`, `c_proj`, and `ln_1`. The wide middle of the block uses `ln_2` and `mlp`. The thirteenth table, in the usual Hugging Face export, is `h.N.attn.bias`, a causal mask stored as data. This engine builds that mask with `nn.CausalMask` and leaves the stored table unread. The 548 MB file was not opened to confirm the name. The count of 13 comes from the stage text.
 
 GPT-2 reads token ids. The prompt "The capital of France is" is the ids `[464, 3139, 286, 4881, 318]`. Once the later stages exist, generation embeds those ids, runs the stack, scores every token in the vocabulary, picks one, and feeds that id back in.
 
@@ -99,9 +99,9 @@ position 1, id 0     wte row 0 [1, 2]  +  wpe row 1 [30, 40]  =  [31, 42]
 
 ## What multiply does
 
-> Note. GPT-2, and the models that keep this block, use two different multiplies. The internal weights (`c_attn`, `c_proj`, and the MLP matrices `c_fc` and `c_proj`) are matrix products: a row is combined with a whole matrix. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one number per column, copied onto every token and multiplied in place. Biases are the same shape of vector, added rather than multiplied. `matmul` does the matrix product. `broadcastMultiply` does the per-column scale. `add` stays one function, because addition has only the broadcast.
+> Note. GPT-2, and the models that keep this block, use two different multiplies. The internal weights (`c_attn`, `c_proj`, and the MLP matrices `c_fc` and `c_proj`) are matrix products: a row is combined with a whole matrix. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one number per column, copied onto every token and multiplied in place. Biases are the same shape of vector, added rather than multiplied. `tensor.MatMul` does the matrix product. `tensor.BroadcastMultiply` does the per-column scale.
 
-`matmul` is the matrix product. That is the call used for `c_attn.weight`, `c_proj.weight`, a query times a transposed key, and the attention weights times `V`. Each entry of the result is a dot product along the shared side. The result has the left tensor's height and the right tensor's width.
+`tensor.MatMul` is the matrix product. That is the call used for `c_attn.weight`, `c_proj.weight`, a query times a transposed key, and the attention weights times `V`. Each entry of the result is a dot product along the shared side. The result has the left tensor's height and the right tensor's width.
 
 Take a `[2, 3]` matrix and stand the list `10, 20, 30` up as a column of shape `[3, 1]`. Inner size 3 matches inner size 3, so this is a product, and the answer is one number per row:
 
@@ -152,7 +152,7 @@ flowchart TD
   ln["layer-norm scales: ln_1, ln_2, ln_f"] --> bcast["broadcastMultiply"]
 ```
 
-The column scale is `broadcastMultiply`. A list has no second dimension, so it is laid across every row and each column is scaled by its own entry. Stored as shape `[3]`, those same numbers scale the matrix like this:
+The column scale is `tensor.BroadcastMultiply`. A list has no second dimension, so it is laid across every row and each column is scaled by its own entry. Stored as shape `[3]`, those same numbers scale the matrix like this:
 
 ```text
 1  2  3      10  20  30      10   40   90
@@ -290,7 +290,7 @@ flowchart TB
 
 `n_head` comes from `config.json`. One slice is `n_embd / n_head` numbers wide. GPT-2 uses 768 and 12, so a slice is 64 wide. The score divides by the square root of that slice width. The single-head stage divided by the square root of the whole row, because the whole row was the slice.
 
-`c_attn` still runs once, before the split. Its weight has shape `[n_embd, 3 * n_embd]`. One input row times that matrix is the three blocks in a line. Inside each block the heads also sit in a line. Head 0 owns the first `head width` columns. Head 1 owns the next band. `sliceHead` copies that band out of every row.
+`c_attn` still runs once, before the split. Its weight has shape `[n_embd, 3 * n_embd]`. One input row times that matrix is the three blocks in a line. Inside each block the heads also sit in a line. Head 0 owns the first `head width` columns. Head 1 owns the next band. `nn.SplitHeads` copies each band out of every row, and `nn.MergeHeads` joins the attended bands again.
 
 The toy here has `n_embd` 2 and `n_head` 2, so each head is one number wide. The weights copy the input into the query, the key, and the value. The input is:
 
@@ -363,7 +363,7 @@ Repeated adds make the numbers grow, so each block first rescales a copy. After 
 
 > Note. The dot in that formula is the broadcast multiply: one scale per column, copied onto every token. The matrix product used for `c_attn.weight` and the other internal weights is the other path, under What multiply does.
 
-`0.00001` is GPT-2's own `layer_norm_epsilon`. The mean and the variance are taken over the numbers in that one row. A comment in `layerNorm` calls the variance unbiased. The code divides by the row length, which is the formula above. Weight and bias are applied after `layerNorm` returns.
+`0.00001` is GPT-2's own `layer_norm_epsilon`. The mean and the population variance are taken over the numbers in that one row. `nn.LayerNorm` applies the model's configured epsilon, weight, and bias.
 
 The toy input is `[[1, 2]]`. `ln_1.weight` is `[1, 1]` and `ln_1.bias` is `[0, 0]`. Attention's weights copy a row into its query, key, and value. There is only one position, so attention returns that row unchanged.
 
@@ -381,7 +381,7 @@ output       [1, 2] + [-1, 1] = about [0, 3]
 
 The precise first number is about `1.99994e-05`. The tester accepts that as `0` within a tolerance of `0.0001`. At the precision the stage prints, `block` shows `[[0.0, 3.0]]`.
 
-`calculateBlock` returns at this add. The second half of the block, `ln_2` and the MLP, is the next stage. Those tensors are in the file, and this function does not read them yet.
+`gpt2.Model.Block` continues through `ln_2` and the MLP, then applies the second residual add.
 
 ## The wide middle of the block
 
@@ -423,7 +423,7 @@ The stage prints `[[-0.15878819, 3.84116958]]`.
 | Attention says `n_pos: 4` while the matrix you loaded has 2 rows | The position count was `n_positions` from the config. The rows in this call are `inputTensor.Shape[0]`. |
 | A one-column attention result is about `1.88` on the second row | Scores 2 and 4 became weights about `0.119` and `0.881`, then `0.119 * 1 + 0.881 * 2`. That is the single-head toy. |
 | Two-head output is `[[1, 0], [0.5, 0.73]]` | Head 0 split two equal scores into `[0.5, 0.5]`. Head 1 split scores 0 and 1 into about `[0.269, 0.731]`. The divisor is `sqrt(1)`, the width of the slice. |
-| A one-token projection has the shape of the weight matrix, and each column looks scaled | The projection was sent to `broadcastMultiply`. `c_proj.weight` is a matrix product, so that call is `matmul`. |
+| A one-token projection has the shape of the weight matrix, and each column looks scaled | The projection was sent to `tensor.BroadcastMultiply`. `c_proj.weight` is a matrix product, so that call is `tensor.MatMul`. |
 | The block on `[[1, 2]]` prints about `[[0, 3]]` | Layer norm of `[1, 2]` is about `[-1, 1]`, one-row attention returns it, and the residual add is `[1, 2] + [-1, 1]`. |
 | That same block prints about `0.001996` in the first column | The denominator was `sqrt(variance) + eps`. The formula divides by `sqrt(variance + 0.00001)`. |
-| `[[1, 2]]` through the full block is about `[-0.159, 3.841]` | `ln_2` produced about `[-1, 1]`, GELU bent those to about `-0.1588` and `0.8412`, and that pair was added onto `[0, 3]`. `calculateBlock` stops before this path. |
+| `[[1, 2]]` through the full block is about `[-0.159, 3.841]` | `ln_2` produced about `[-1, 1]`, GELU bent those to about `-0.1588` and `0.8412`, and that pair was added onto `[0, 3]`. |
