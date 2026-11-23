@@ -48,12 +48,13 @@ func Load(path string) (map[string]tensorpkg.Tensor, error) {
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
 		return nil, err
 	}
-	data, err := io.ReadAll(f)
+	dataStart, err := f.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return nil, err
 	}
 
 	tensors := make(map[string]tensorpkg.Tensor)
+	var raw []byte
 	for name, info := range header {
 		if name == "__metadata__" {
 			continue
@@ -62,10 +63,20 @@ func Load(path string) (map[string]tensorpkg.Tensor, error) {
 		if !ok {
 			return nil, fmt.Errorf("unsupported dtype %s", info.DType)
 		}
-		raw := data[info.DataOffsets[0]:info.DataOffsets[1]]
-		values := make([]float32, len(raw)/decoder.width)
+		nbytes := info.DataOffsets[1] - info.DataOffsets[0]
+		if nbytes < 0 || nbytes%decoder.width != 0 {
+			return nil, fmt.Errorf("invalid data range for %s", name)
+		}
+		if cap(raw) < nbytes {
+			raw = make([]byte, nbytes)
+		}
+		raw = raw[:nbytes]
+		if _, err := f.ReadAt(raw, dataStart+int64(info.DataOffsets[0])); err != nil {
+			return nil, err
+		}
+		values := make([]float32, nbytes/decoder.width)
 		for i := range values {
-			values[i] = decoder.decode(raw[i*decoder.width:])
+			values[i] = decoder.decode(raw[i*decoder.width : (i+1)*decoder.width])
 		}
 		tensors[name] = tensorpkg.Tensor{DType: info.DType, Shape: info.Shape, Values: values}
 	}
