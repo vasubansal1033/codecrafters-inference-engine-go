@@ -288,53 +288,35 @@ func calculateScore(t tensorpkg.Tensor, numPositions int, numEmbeddings int, num
 		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, numPositions, numEmbeddings, numHeads)
 	}
 
+	// Fused row is [Q | K | V], and each block is [head 0 | head 1 | ...].
+	// Copy only this head's columns. Shape is [n_pos, head_dim].
+	headDim := numEmbeddings / numHeads
 	q := tensorpkg.Tensor{
 		DType:  t.DType,
-		Shape:  []int{numPositions, numEmbeddings},
-		Values: make([]float32, numPositions*numEmbeddings),
+		Shape:  []int{numPositions, headDim},
+		Values: make([]float32, numPositions*headDim),
 	}
 	k := tensorpkg.Tensor{
 		DType:  t.DType,
-		Shape:  []int{numPositions, numEmbeddings},
-		Values: make([]float32, numPositions*numEmbeddings),
+		Shape:  []int{numPositions, headDim},
+		Values: make([]float32, numPositions*headDim),
 	}
 	v := tensorpkg.Tensor{
 		DType:  t.DType,
-		Shape:  []int{numPositions, numEmbeddings},
-		Values: make([]float32, numPositions*numEmbeddings),
+		Shape:  []int{numPositions, headDim},
+		Values: make([]float32, numPositions*headDim),
 	}
 
 	stride := 3 * numEmbeddings
+	qBase := head * headDim
+	kBase := numEmbeddings + qBase
+	vBase := 2*numEmbeddings + qBase
 	for i := 0; i < numPositions; i++ {
 		row := t.Values[i*stride : (i+1)*stride]
-		copy(q.Values[i*numEmbeddings:(i+1)*numEmbeddings], row[:numEmbeddings])
-		copy(k.Values[i*numEmbeddings:(i+1)*numEmbeddings], row[numEmbeddings:2*numEmbeddings])
-		copy(v.Values[i*numEmbeddings:(i+1)*numEmbeddings], row[2*numEmbeddings:3*numEmbeddings])
+		copy(q.Values[i*headDim:(i+1)*headDim], row[qBase:qBase+headDim])
+		copy(k.Values[i*headDim:(i+1)*headDim], row[kBase:kBase+headDim])
+		copy(v.Values[i*headDim:(i+1)*headDim], row[vBase:vBase+headDim])
 	}
-
-	// q, k, v are sliced heads representing the head indexed "head" argument
-	// dimension is (n_pos, head_dim)
-	/*
-		attention input: [Q|K\V] -> (n_pos, 3*n_embd)
-		Q, K, V -> (n_pos, n_embd)
-		Now these are again sliced
-		Q -> [q0|q1|...|qm] where m = head_dim
-		K -> [k0|k1|...|km]
-		V -> [v0|v1|...|vm]
-	*/
-	qHeads, err := nn.SplitHeads(q, numHeads)
-	if err != nil {
-		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
-	}
-	kHeads, err := nn.SplitHeads(k, numHeads)
-	if err != nil {
-		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
-	}
-	vHeads, err := nn.SplitHeads(v, numHeads)
-	if err != nil {
-		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
-	}
-	q, k, v = qHeads[head], kHeads[head], vHeads[head]
 
 	kT, err := k.Transpose()
 	if err != nil {
