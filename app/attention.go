@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"math"
 	"os"
 	"slices"
@@ -50,16 +51,16 @@ func loadConfig(path string) (GPT2Config, error) {
 	return readJSON[GPT2Config](path)
 }
 
-func loadInputRows(path string) (tensor, error) {
+func loadInputRows(path string) (tensorpkg.Tensor, error) {
 	inputRows, err := readJSON[[][]float32](path)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	// convert to tensor output
 	// [num_pos, n_embd]
 	tensorShape := []int{len(inputRows), len(inputRows[0])}
-	inputTensor := tensor{
+	inputTensor := tensorpkg.Tensor{
 		DType:  "F32",
 		Shape:  tensorShape,
 		Values: []float32{},
@@ -86,38 +87,38 @@ func readJSON[T any](path string) (T, error) {
 	return value, err
 }
 
-func linear(input, weights, bias tensor) (tensor, error) {
-	output, err := input.matmul(weights)
+func linear(input, weights, bias tensorpkg.Tensor) (tensorpkg.Tensor, error) {
+	output, err := input.MatMul(weights)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
-	return output.add(bias)
+	return output.Add(bias)
 }
 
-func layerNormAffine(input, weights, bias tensor, eps float32) (tensor, error) {
-	output, err := input.layerNorm(1, eps)
+func layerNormAffine(input, weights, bias tensorpkg.Tensor, eps float32) (tensorpkg.Tensor, error) {
+	output, err := input.LayerNorm(1, eps)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
-	output, err = output.broadcastMultiply(weights)
+	output, err = output.BroadcastMultiply(weights)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
-	return output.add(bias)
+	return output.Add(bias)
 }
 
 type layerWeights struct {
-	attnWeight, attnBias tensor
-	attnProjWeight       tensor
-	attnProjBias         tensor
-	ln1Weight, ln1Bias   tensor
-	ln2Weight, ln2Bias   tensor
-	mlpWeight, mlpBias   tensor
-	mlpProjWeight        tensor
-	mlpProjBias          tensor
+	attnWeight, attnBias tensorpkg.Tensor
+	attnProjWeight       tensorpkg.Tensor
+	attnProjBias         tensorpkg.Tensor
+	ln1Weight, ln1Bias   tensorpkg.Tensor
+	ln2Weight, ln2Bias   tensorpkg.Tensor
+	mlpWeight, mlpBias   tensorpkg.Tensor
+	mlpProjWeight        tensorpkg.Tensor
+	mlpProjBias          tensorpkg.Tensor
 }
 
-func weightsForLayer(tmap map[string]tensor, layer int) layerWeights {
+func weightsForLayer(tmap map[string]tensorpkg.Tensor, layer int) layerWeights {
 	prefix := fmt.Sprintf("h.%d.", layer)
 	return layerWeights{
 		attnWeight:     tmap[prefix+"attn.c_attn.weight"],
@@ -135,7 +136,7 @@ func weightsForLayer(tmap map[string]tensor, layer int) layerWeights {
 	}
 }
 
-func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
+func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	weights := weightsForLayer(tmap, layerNum)
 
 	/*
@@ -163,14 +164,14 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int,
 
 	add, err := linear(inputTensor, weights.attnWeight, weights.attnBias)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	numPositions := inputTensor.Shape[0]
 	numEmbeddings := config.NumberOfEmbeddings
 	numHeads := config.NumberOfHeads
 	if numHeads <= 0 || numEmbeddings%numHeads != 0 {
-		return tensor{}, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", numEmbeddings, numHeads)
+		return tensorpkg.Tensor{}, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", numEmbeddings, numHeads)
 	}
 
 	// MHA calculation
@@ -183,7 +184,7 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int,
 			Q = [Q1 | Q2 .... | Qn_heads]
 	*/
 	headDim := numEmbeddings / numHeads
-	attended := tensor{
+	attended := tensorpkg.Tensor{
 		DType:  add.DType,
 		Shape:  []int{numPositions, numEmbeddings},
 		Values: make([]float32, numPositions*numEmbeddings),
@@ -193,22 +194,22 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int,
 	for h := 0; h < numHeads; h++ {
 		score, V, err := calculateScore(add, numPositions, numEmbeddings, numHeads, h)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 		err = applyCausalMask(score)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 
-		softmaxScore, err := score.softmax(1, 1)
+		softmaxScore, err := score.Softmax(1, 1)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 
 		// causally attended embeddings
-		headOut, err := softmaxScore.matmul(V)
+		headOut, err := softmaxScore.MatMul(V)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 
 		// placing this sub-head's attention (n_pos, n_embd/n_head)
@@ -221,17 +222,17 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int,
 
 	res, err := linear(attended, weights.attnProjWeight, weights.attnProjBias)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	return res, nil
 }
 
-func calculateBlock(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
+func calculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	weights := weightsForLayer(tmap, layerNum)
 	layerNorm, err := layerNormAffine(inputTensor, weights.ln1Weight, weights.ln1Bias, config.LayerNormEpsilon)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	// calculate attn on layernormed input
@@ -242,24 +243,24 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layerNum int, inp
 		layerNorm,
 	)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
-	resOutput, err := inputTensor.add(attn)
+	resOutput, err := inputTensor.Add(attn)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	resOutput, err = performMLP(tmap, config, layerNum, resOutput)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	return resOutput, nil
 }
 
-func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tensor) (tensor, error) {
-	attendedEmbeddings := tensor{
+func calculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
+	attendedEmbeddings := tensorpkg.Tensor{
 		DType:  inputTensor.DType,
 		Shape:  inputTensor.Shape,
 		Values: slices.Clone(inputTensor.Values),
@@ -268,7 +269,7 @@ func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tens
 	for i := range config.NumberOfLayers {
 		a, err := calculateBlock(tmap, config, i, attendedEmbeddings)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 
 		attendedEmbeddings = a
@@ -276,7 +277,7 @@ func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tens
 
 	embdLength := inputTensor.Shape[1]
 	lastAttendedEmbeddingStart := len(inputTensor.Values) - embdLength
-	lastAttendedEmbedding := tensor{
+	lastAttendedEmbedding := tensorpkg.Tensor{
 		DType:  attendedEmbeddings.DType,
 		Shape:  []int{1, embdLength},
 		Values: attendedEmbeddings.Values[lastAttendedEmbeddingStart:],
@@ -288,7 +289,7 @@ func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tens
 
 	lastAttendedEmbedding, err := layerNormAffine(lastAttendedEmbedding, layerNormWeights, layerNormBias, config.LayerNormEpsilon)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	/*
@@ -303,20 +304,20 @@ func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tens
 	*/
 
 	wteWeight := tmap["wte.weight"]
-	wteWeight, err = wteWeight.transpose()
+	wteWeight, err = wteWeight.Transpose()
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
-	logits, err := lastAttendedEmbedding.matmul(wteWeight)
+	logits, err := lastAttendedEmbedding.MatMul(wteWeight)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	return logits, nil
 }
 
-func performGeneration(tmap map[string]tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensor) ([]int, error) {
+func performGeneration(tmap map[string]tensorpkg.Tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensorpkg.Tensor) ([]int, error) {
 
 	generatedIds := []int{}
 	for range tokenConfig.Count {
@@ -339,23 +340,23 @@ func performGeneration(tmap map[string]tensor, config GPT2Config, tokenConfig To
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
 // In MHA performs calculation for Qh, Kh, Vh
-func calculateScore(t tensor, numPositions int, numEmbeddings int, numHeads int, head int) (tensor, tensor, error) {
+func calculateScore(t tensorpkg.Tensor, numPositions int, numEmbeddings int, numHeads int, head int) (tensorpkg.Tensor, tensorpkg.Tensor, error) {
 	tshape := t.Shape
 	if len(tshape) != 2 || numPositions < 0 || numEmbeddings <= 0 || numHeads <= 0 || head < 0 || head >= numHeads || numEmbeddings%numHeads != 0 || tshape[0] != numPositions || tshape[1] != 3*numEmbeddings || len(t.Values) < numPositions*3*numEmbeddings {
-		return tensor{}, tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, numPositions, numEmbeddings, numHeads)
+		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, numPositions, numEmbeddings, numHeads)
 	}
 
-	q := tensor{
+	q := tensorpkg.Tensor{
 		DType:  t.DType,
 		Shape:  []int{numPositions, numEmbeddings},
 		Values: make([]float32, numPositions*numEmbeddings),
 	}
-	k := tensor{
+	k := tensorpkg.Tensor{
 		DType:  t.DType,
 		Shape:  []int{numPositions, numEmbeddings},
 		Values: make([]float32, numPositions*numEmbeddings),
 	}
-	v := tensor{
+	v := tensorpkg.Tensor{
 		DType:  t.DType,
 		Shape:  []int{numPositions, numEmbeddings},
 		Values: make([]float32, numPositions*numEmbeddings),
@@ -383,31 +384,31 @@ func calculateScore(t tensor, numPositions int, numEmbeddings int, numHeads int,
 	// q, k, v actually are qi's above
 	q, k, v = sliceHead(q, head, headDim), sliceHead(k, head, headDim), sliceHead(v, head, headDim)
 
-	kT, err := k.transpose()
+	kT, err := k.Transpose()
 	if err != nil {
-		return tensor{}, tensor{}, err
+		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
 	}
-	qk, err := q.matmul(kT)
+	qk, err := q.MatMul(kT)
 	if err != nil {
-		return tensor{}, tensor{}, err
+		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
 	}
 	// Dot is over key_dim = n_embd/n_heads.
 	dK := float32(headDim)
-	res, err := qk.scale(1 / float32(math.Sqrt(float64(dK))))
+	res, err := qk.Scale(1 / float32(math.Sqrt(float64(dK))))
 	return res, v, err
 }
 
-func performMLP(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
+func performMLP(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	weights := weightsForLayer(tmap, layerNum)
 	layerNormOutput, err := layerNormAffine(inputTensor, weights.ln2Weight, weights.ln2Bias, config.LayerNormEpsilon)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	// apply MLP weights
 	mlpOutput, err := linear(layerNormOutput, weights.mlpWeight, weights.mlpBias)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	// apply gelu approx. which is element wise operation
@@ -418,21 +419,21 @@ func performMLP(tmap map[string]tensor, config GPT2Config, layerNum int, inputTe
 	// apply MLP projection
 	mlpOutput, err = linear(mlpOutput, weights.mlpProjWeight, weights.mlpProjBias)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
-	mlpOutput, err = inputTensor.add(mlpOutput)
+	mlpOutput, err = inputTensor.Add(mlpOutput)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	return mlpOutput, nil
 }
 
-func sliceHead(t tensor, head int, headDim int) tensor {
+func sliceHead(t tensorpkg.Tensor, head int, headDim int) tensorpkg.Tensor {
 	numPositions, numEmbeddings := t.Shape[0], t.Shape[1]
 	start := head * headDim
-	out := tensor{
+	out := tensorpkg.Tensor{
 		DType:  t.DType,
 		Shape:  []int{numPositions, headDim},
 		Values: make([]float32, numPositions*headDim),
@@ -443,7 +444,7 @@ func sliceHead(t tensor, head int, headDim int) tensor {
 	return out
 }
 
-func applyCausalMask(t tensor) error {
+func applyCausalMask(t tensorpkg.Tensor) error {
 	minf := math.Inf(-1)
 	tshape := t.Shape
 	rows, cols := tshape[0], tshape[1]
@@ -451,7 +452,7 @@ func applyCausalMask(t tensor) error {
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
 			if j > i {
-				flatIdx, err := t.getFlatArrayIdx(i, j)
+				flatIdx, err := t.FlatIndex(i, j)
 				if err != nil {
 					return err
 				}

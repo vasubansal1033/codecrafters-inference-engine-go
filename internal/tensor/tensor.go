@@ -1,4 +1,4 @@
-package main
+package tensor
 
 import (
 	"fmt"
@@ -7,18 +7,18 @@ import (
 )
 
 // tensor is one table of numbers from a safetensors file.
-type tensor struct {
+type Tensor struct {
 	DType  string
 	Shape  []int
 	Values []float32
 }
 
 // TODO[improvement]: current implementations work only for 2D tensors
-func (t1 tensor) add(t2 tensor) (tensor, error) {
+func (t1 Tensor) Add(t2 Tensor) (Tensor, error) {
 	return t1.broadcastBinary(t2, func(a, b float32) float32 { return a + b }, "Addition", "+")
 }
 
-func (t1 tensor) broadcastBinary(t2 tensor, op func(float32, float32) float32, opName, symbol string) (tensor, error) {
+func (t1 Tensor) broadcastBinary(t2 Tensor, op func(float32, float32) float32, opName, symbol string) (Tensor, error) {
 	// Shape [n] is one row. [m,n] with [n] or [1,n] broadcasts on that row.
 	bothRank1 := len(t1.Shape) == 1 && len(t2.Shape) == 1
 	dtype := t1.DType
@@ -31,7 +31,7 @@ func (t1 tensor) broadcastBinary(t2 tensor, op func(float32, float32) float32, o
 
 	t1Shape, t2Shape := t1.Shape, t2.Shape
 	if len(t1Shape) != 2 || len(t2Shape) != 2 || t1Shape[1] != t2Shape[1] || (t1Shape[0] != t2Shape[0] && t1Shape[0] != 1 && t2Shape[0] != 1) {
-		return tensor{}, fmt.Errorf("%s error: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
+		return Tensor{}, fmt.Errorf("%s error: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
 	}
 	if t1Shape[0] == 1 && t2Shape[0] != 1 {
 		t1, t2 = t2, t1
@@ -42,7 +42,7 @@ func (t1 tensor) broadcastBinary(t2 tensor, op func(float32, float32) float32, o
 		for i := 0; i < t1Shape[0]; i++ {
 			copy(repeated[i*t1Shape[1]:(i+1)*t1Shape[1]], t2.Values)
 		}
-		t2 = tensor{DType: t2.DType, Shape: []int{t1Shape[0], t1Shape[1]}, Values: repeated}
+		t2 = Tensor{DType: t2.DType, Shape: []int{t1Shape[0], t1Shape[1]}, Values: repeated}
 		t2Shape = t2.Shape
 	}
 
@@ -52,13 +52,13 @@ func (t1 tensor) broadcastBinary(t2 tensor, op func(float32, float32) float32, o
 	out.Values = slices.Clone(t1.Values)
 	for i := 0; i < t1Shape[0]; i++ {
 		for j := 0; j < t2Shape[1]; j++ {
-			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
+			t1FlatIdx, err := t1.FlatIndex(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("%s error[1]: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
+				return Tensor{}, fmt.Errorf("%s error[1]: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
 			}
-			t2FlatIdx, err := t2.getFlatArrayIdx(i, j)
+			t2FlatIdx, err := t2.FlatIndex(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("%s error[2]: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
+				return Tensor{}, fmt.Errorf("%s error[2]: invalid shapes %v %s %v", opName, t1Shape, symbol, t2Shape)
 			}
 
 			out.Values[t1FlatIdx] = op(t1.Values[t1FlatIdx], t2.Values[t2FlatIdx])
@@ -71,7 +71,7 @@ func (t1 tensor) broadcastBinary(t2 tensor, op func(float32, float32) float32, o
 	return out, nil
 }
 
-func (t1 tensor) mapValues(opName string, f func(float32) float32) (tensor, error) {
+func (t1 Tensor) mapValues(opName string, f func(float32) float32) (Tensor, error) {
 	rank1 := len(t1.Shape) == 1
 	if rank1 {
 		t1.Shape = []int{1, t1.Shape[0]}
@@ -81,9 +81,9 @@ func (t1 tensor) mapValues(opName string, f func(float32) float32) (tensor, erro
 	out.Values = slices.Clone(t1.Values)
 	for i := 0; i < t1Shape[0]; i++ {
 		for j := 0; j < t1Shape[1]; j++ {
-			t1FlatIdx, err := t1.getFlatArrayIdx(i, j)
+			t1FlatIdx, err := t1.FlatIndex(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("%s error[1]: invalid shapes %v", opName, t1Shape)
+				return Tensor{}, fmt.Errorf("%s error[1]: invalid shapes %v", opName, t1Shape)
 			}
 			out.Values[t1FlatIdx] = f(t1.Values[t1FlatIdx])
 		}
@@ -95,35 +95,35 @@ func (t1 tensor) mapValues(opName string, f func(float32) float32) (tensor, erro
 	return out, nil
 }
 
-func (t1 tensor) scale(n float32) (tensor, error) {
+func (t1 Tensor) Scale(n float32) (Tensor, error) {
 	return t1.mapValues("Scale", func(value float32) float32 { return value * n })
 }
 
-func (t tensor) transpose() (tensor, error) {
+func (t Tensor) Transpose() (Tensor, error) {
 	rank1 := len(t.Shape) == 1
 	if rank1 {
 		t.Shape = []int{1, t.Shape[0]}
 	}
 	if len(t.Shape) != 2 {
-		return tensor{}, fmt.Errorf("Transpose error: invalid shape %v", t.Shape)
+		return Tensor{}, fmt.Errorf("Transpose error: invalid shape %v", t.Shape)
 	}
 
 	rows, cols := t.Shape[0], t.Shape[1]
-	out := tensor{
+	out := Tensor{
 		DType:  t.DType,
 		Shape:  []int{cols, rows},
 		Values: make([]float32, rows*cols),
 	}
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
-			src, err := t.getFlatArrayIdx(i, j)
+			src, err := t.FlatIndex(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Transpose error[1]: invalid shapes %v", t.Shape)
+				return Tensor{}, fmt.Errorf("Transpose error[1]: invalid shapes %v", t.Shape)
 			}
 			// out shape is [cols, rows], so element (j, i) is the transposed spot.
-			dst, err := out.getFlatArrayIdx(j, i)
+			dst, err := out.FlatIndex(j, i)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Transpose error[2]: invalid shapes %v", out.Shape)
+				return Tensor{}, fmt.Errorf("Transpose error[2]: invalid shapes %v", out.Shape)
 			}
 			out.Values[dst] = t.Values[src]
 		}
@@ -132,21 +132,21 @@ func (t tensor) transpose() (tensor, error) {
 	return out, nil
 }
 
-func (t1 tensor) exp() (tensor, error) {
+func (t1 Tensor) Exp() (Tensor, error) {
 	return t1.mapValues("Exp", func(value float32) float32 {
 		return float32(math.Exp(float64(value)))
 	})
 }
 
-func (t1 tensor) matmul(t2 tensor) (tensor, error) {
+func (t1 Tensor) MatMul(t2 Tensor) (Tensor, error) {
 	t1Shape, t2Shape := t1.Shape, t2.Shape
 	// mxn times nxp -> mxp
 	if len(t1Shape) != 2 || len(t2Shape) != 2 || t1Shape[1] != t2Shape[0] {
-		return tensor{}, fmt.Errorf("Multiplication error: invalid shapes %v x %v", t1Shape, t2Shape)
+		return Tensor{}, fmt.Errorf("Multiplication error: invalid shapes %v x %v", t1Shape, t2Shape)
 	}
 
 	resRows, resCols := t1Shape[0], t2Shape[1]
-	res := tensor{
+	res := Tensor{
 		DType:  t1.DType, // assuming both have same DType,
 		Shape:  []int{resRows, resCols},
 		Values: make([]float32, resRows*resCols),
@@ -158,19 +158,19 @@ func (t1 tensor) matmul(t2 tensor) (tensor, error) {
 	commonDim := t1Shape[1]
 	for i := 0; i < resRows; i++ {
 		for j := 0; j < resCols; j++ {
-			flatIdx, err := res.getFlatArrayIdx(i, j)
+			flatIdx, err := res.FlatIndex(i, j)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
+				return Tensor{}, fmt.Errorf("Multiplication error[1]: invalid shapes %v x %v", t1Shape, t2Shape)
 			}
 
 			for k := 0; k < commonDim; k++ {
-				t1FlatIdx, err := t1.getFlatArrayIdx(i, k)
+				t1FlatIdx, err := t1.FlatIndex(i, k)
 				if err != nil {
-					return tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
+					return Tensor{}, fmt.Errorf("Multiplication error[2]: invalid shapes %v x %v", t1Shape, t2Shape)
 				}
-				t2FlatIdx, err := t2.getFlatArrayIdx(k, j)
+				t2FlatIdx, err := t2.FlatIndex(k, j)
 				if err != nil {
-					return tensor{}, fmt.Errorf("Multiplication error[3]: invalid shapes %v x %v", t1Shape, t2Shape)
+					return Tensor{}, fmt.Errorf("Multiplication error[3]: invalid shapes %v x %v", t1Shape, t2Shape)
 				}
 
 				res.Values[flatIdx] += t1.Values[t1FlatIdx] * t2.Values[t2FlatIdx]
@@ -181,16 +181,16 @@ func (t1 tensor) matmul(t2 tensor) (tensor, error) {
 	return res, nil
 }
 
-func (t1 tensor) broadcastMultiply(t2 tensor) (tensor, error) {
+func (t1 Tensor) BroadcastMultiply(t2 Tensor) (Tensor, error) {
 	return t1.broadcastBinary(t2, func(a, b float32) float32 { return a * b }, "Multiplication", "x")
 }
 
-func (t tensor) softmax(dim int, temp float32) (tensor, error) {
+func (t Tensor) Softmax(dim int, temp float32) (Tensor, error) {
 	if dim != 1 {
-		return tensor{}, fmt.Errorf("Softmax error: Invalid dimension %d passed for shape %v", dim, t.Shape)
+		return Tensor{}, fmt.Errorf("Softmax error: Invalid dimension %d passed for shape %v", dim, t.Shape)
 	}
 	if temp <= 0 {
-		return tensor{}, fmt.Errorf("Softmax error: Invalid temperature value %v passed", temp)
+		return Tensor{}, fmt.Errorf("Softmax error: Invalid temperature value %v passed", temp)
 	}
 
 	// current challenge requires normalization along rows (dim=1).
@@ -201,13 +201,13 @@ func (t tensor) softmax(dim int, temp float32) (tensor, error) {
 	out.Values = slices.Clone(t.Values)
 	if dim == 1 {
 		for i := 0; i < rows; i++ {
-			rowStartFlatIdx, err := t.getFlatArrayIdx(i, 0)
+			rowStartFlatIdx, err := t.FlatIndex(i, 0)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Softmax error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+				return Tensor{}, fmt.Errorf("Softmax error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
 			}
-			rowEndFlatIdx, err := t.getFlatArrayIdx(i, cols-1)
+			rowEndFlatIdx, err := t.FlatIndex(i, cols-1)
 			if err != nil {
-				return tensor{}, fmt.Errorf("Softmax error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+				return Tensor{}, fmt.Errorf("Softmax error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
 			}
 
 			/*
@@ -231,9 +231,9 @@ func (t tensor) softmax(dim int, temp float32) (tensor, error) {
 	return out, nil
 }
 
-func (t tensor) layerNorm(dim int, eps float32) (tensor, error) {
+func (t Tensor) LayerNorm(dim int, eps float32) (Tensor, error) {
 	if dim != 1 {
-		return tensor{}, fmt.Errorf("LayerNorm error: Invalid dimension %d passed for shape %v", dim, t.Shape)
+		return Tensor{}, fmt.Errorf("LayerNorm error: Invalid dimension %d passed for shape %v", dim, t.Shape)
 	}
 
 	// current challenge requires normalization along rows (dim=1).
@@ -244,13 +244,13 @@ func (t tensor) layerNorm(dim int, eps float32) (tensor, error) {
 	out.Values = slices.Clone(t.Values)
 	if dim == 1 {
 		for i := 0; i < rows; i++ {
-			rowStartFlatIdx, err := t.getFlatArrayIdx(i, 0)
+			rowStartFlatIdx, err := t.FlatIndex(i, 0)
 			if err != nil {
-				return tensor{}, fmt.Errorf("LayerNorm error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+				return Tensor{}, fmt.Errorf("LayerNorm error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
 			}
-			rowEndFlatIdx, err := t.getFlatArrayIdx(i, cols-1)
+			rowEndFlatIdx, err := t.FlatIndex(i, cols-1)
 			if err != nil {
-				return tensor{}, fmt.Errorf("LayerNorm error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
+				return Tensor{}, fmt.Errorf("LayerNorm error[1]: Invalid dimension %d passed for shape %v", dim, t.Shape)
 			}
 
 			/*
@@ -280,7 +280,7 @@ func (t tensor) layerNorm(dim int, eps float32) (tensor, error) {
 
 }
 
-func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
+func (t *Tensor) FlatIndex(i int, j int) (int, error) {
 	/*
 		2, 3
 		0(0, 0) 1(0, 1) 2(0, 2)
@@ -307,7 +307,7 @@ func (t *tensor) getFlatArrayIdx(i int, j int) (int, error) {
 	return idx, nil
 }
 
-func (t *tensor) get2DArray() [][]float32 {
+func (t *Tensor) Rows() [][]float32 {
 	res := make([][]float32, t.Shape[0])
 	for i := 0; i < t.Shape[0]; i++ {
 		res[i] = t.Values[i*t.Shape[1] : (i+1)*t.Shape[1]]

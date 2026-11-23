@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"slices"
 )
 
@@ -12,7 +13,7 @@ import (
 // embedTokens calculates the embedding and returns result as 2D array
 // (token embedding + position embedding of token in prompt)
 // tokenId[i] -> i position, tokenId[i] -> token id
-func embedTokenIds(tmap map[string]tensor, tokenIds []int) (tensor, error) {
+func embedTokenIds(tmap map[string]tensorpkg.Tensor, tokenIds []int) (tensorpkg.Tensor, error) {
 	numTokenIds := len(tokenIds)
 	var embedding []float32
 	for pos := range numTokenIds {
@@ -20,17 +21,17 @@ func embedTokenIds(tmap map[string]tensor, tokenIds []int) (tensor, error) {
 
 		tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 		posEmbedding, err := getEmbeddingFromTensorValues(tmap["wpe.weight"], pos)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 
 		// merge the two embeddings
 		mergedEmbedding, err := mergeTokenAndPosEmbeddings(tokenEmbedding, posEmbedding)
 		if err != nil {
-			return tensor{}, err
+			return tensorpkg.Tensor{}, err
 		}
 
 		embedding = append(embedding, mergedEmbedding...)
@@ -38,42 +39,42 @@ func embedTokenIds(tmap map[string]tensor, tokenIds []int) (tensor, error) {
 
 	numEmbeddings := len(embedding) / numTokenIds
 
-	return tensor{
+	return tensorpkg.Tensor{
 		DType:  "F32",
 		Shape:  []int{numTokenIds, numEmbeddings},
 		Values: embedding,
 	}, nil
 }
 
-func addTokenIdEmbedding(tmap map[string]tensor, inputTensor tensor, tokenId int) (tensor, error) {
+func addTokenIdEmbedding(tmap map[string]tensorpkg.Tensor, inputTensor tensorpkg.Tensor, tokenId int) (tensorpkg.Tensor, error) {
 	numTokenIds := inputTensor.Shape[0]
 	numEmbeddings := inputTensor.Shape[1]
 
 	tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 	posEmbedding, err := getEmbeddingFromTensorValues(tmap["wpe.weight"], numTokenIds)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	// merge the two embeddings
 	mergedEmbedding, err := mergeTokenAndPosEmbeddings(tokenEmbedding, posEmbedding)
 	if err != nil {
-		return tensor{}, err
+		return tensorpkg.Tensor{}, err
 	}
 
 	values := append(slices.Clone(inputTensor.Values), mergedEmbedding...)
 
-	return tensor{
+	return tensorpkg.Tensor{
 		DType:  "F32",
 		Shape:  []int{numTokenIds + 1, numEmbeddings},
 		Values: values,
 	}, nil
 }
 
-func getEmbeddingFromTensorValues(t tensor, id int) ([]float32, error) {
+func getEmbeddingFromTensorValues(t tensorpkg.Tensor, id int) ([]float32, error) {
 	tensorShape := t.Shape
 	tensorValues := t.Values
 

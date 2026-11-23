@@ -69,7 +69,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
 			os.Exit(1)
 		}
-		encoded, err := json.Marshal(mergedEmbeddings.get2DArray())
+		encoded, err := json.Marshal(mergedEmbeddings.Rows())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding output: %s\n", err)
 			os.Exit(1)
@@ -121,7 +121,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		attnJson, err := json.Marshal(attn.get2DArray())
+		attnJson, err := json.Marshal(attn.Rows())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding attn output: %s\n", err)
 			os.Exit(1)
@@ -173,7 +173,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		blockJson, err := json.Marshal(block.get2DArray())
+		blockJson, err := json.Marshal(block.Rows())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding block output: %s\n", err)
 			os.Exit(1)
@@ -223,7 +223,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		logitJson, err := json.Marshal(logits.get2DArray()[0])
+		logitJson, err := json.Marshal(logits.Rows()[0])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding logits output: %s\n", err)
 			os.Exit(1)

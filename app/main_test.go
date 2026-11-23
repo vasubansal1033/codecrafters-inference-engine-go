@@ -1,6 +1,7 @@
 package main
 
 import (
+	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"math"
 	"os"
 	"path/filepath"
@@ -20,48 +21,48 @@ func closeValues(t *testing.T, got, want []float32, tolerance float32) {
 }
 
 func TestTensorOperations(t *testing.T) {
-	matrix := tensor{DType: "F32", Shape: []int{2, 3}, Values: []float32{1, 2, 3, 4, 5, 6}}
-	vector := tensor{DType: "F32", Shape: []int{3}, Values: []float32{10, 20, 30}}
+	matrix := tensorpkg.Tensor{DType: "F32", Shape: []int{2, 3}, Values: []float32{1, 2, 3, 4, 5, 6}}
+	vector := tensorpkg.Tensor{DType: "F32", Shape: []int{3}, Values: []float32{10, 20, 30}}
 
-	added, err := matrix.add(vector)
+	added, err := matrix.Add(vector)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeValues(t, added.Values, []float32{11, 22, 33, 14, 25, 36}, 0)
 
-	multiplied, err := matrix.broadcastMultiply(vector)
+	multiplied, err := matrix.BroadcastMultiply(vector)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeValues(t, multiplied.Values, []float32{10, 40, 90, 40, 100, 180}, 0)
 
-	column := tensor{DType: "F32", Shape: []int{3, 1}, Values: []float32{10, 20, 30}}
-	product, err := matrix.matmul(column)
+	column := tensorpkg.Tensor{DType: "F32", Shape: []int{3, 1}, Values: []float32{10, 20, 30}}
+	product, err := matrix.MatMul(column)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeValues(t, product.Values, []float32{140, 320}, 0)
 
-	transposed, err := matrix.transpose()
+	transposed, err := matrix.Transpose()
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeValues(t, transposed.Values, []float32{1, 4, 2, 5, 3, 6}, 0)
 
-	probabilities, err := (tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{0, 1}}).softmax(1, 1)
+	probabilities, err := (tensorpkg.Tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{0, 1}}).Softmax(1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeValues(t, probabilities.Values, []float32{0.26894143, 0.7310586}, 1e-6)
 
-	normalized, err := (tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}}).layerNorm(1, 1e-5)
+	normalized, err := (tensorpkg.Tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}}).LayerNorm(1, 1e-5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeValues(t, normalized.Values, []float32{-0.99998, 0.99998}, 1e-5)
 }
 
-func attentionWeights(nEmbeddings int) map[string]tensor {
+func attentionWeights(nEmbeddings int) map[string]tensorpkg.Tensor {
 	qkv := make([]float32, nEmbeddings*3*nEmbeddings)
 	for i := 0; i < nEmbeddings; i++ {
 		qkv[i*3*nEmbeddings+i] = 1
@@ -72,7 +73,7 @@ func attentionWeights(nEmbeddings int) map[string]tensor {
 	for i := 0; i < nEmbeddings; i++ {
 		proj[i*nEmbeddings+i] = 1
 	}
-	return map[string]tensor{
+	return map[string]tensorpkg.Tensor{
 		"h.0.attn.c_attn.weight": {DType: "F32", Shape: []int{nEmbeddings, 3 * nEmbeddings}, Values: qkv},
 		"h.0.attn.c_attn.bias":   {DType: "F32", Shape: []int{3 * nEmbeddings}, Values: make([]float32, 3*nEmbeddings)},
 		"h.0.attn.c_proj.weight": {DType: "F32", Shape: []int{nEmbeddings, nEmbeddings}, Values: proj},
@@ -83,7 +84,7 @@ func attentionWeights(nEmbeddings int) map[string]tensor {
 func TestAttentionGolden(t *testing.T) {
 	weights := attentionWeights(1)
 	got, err := calculateAttention(weights, GPT2Config{NumberOfEmbeddings: 1, NumberOfHeads: 1}, 0,
-		tensor{DType: "F32", Shape: []int{2, 1}, Values: []float32{1, 2}})
+		tensorpkg.Tensor{DType: "F32", Shape: []int{2, 1}, Values: []float32{1, 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func TestAttentionGolden(t *testing.T) {
 func TestTwoHeadAttentionGolden(t *testing.T) {
 	weights := attentionWeights(2)
 	got, err := calculateAttention(weights, GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 2}, 0,
-		tensor{DType: "F32", Shape: []int{2, 2}, Values: []float32{1, 0, 0, 1}})
+		tensorpkg.Tensor{DType: "F32", Shape: []int{2, 2}, Values: []float32{1, 0, 0, 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,23 +103,23 @@ func TestTwoHeadAttentionGolden(t *testing.T) {
 
 func TestBlockGolden(t *testing.T) {
 	weights := attentionWeights(2)
-	weights["h.0.ln_1.weight"] = tensor{DType: "F32", Shape: []int{2}, Values: []float32{1, 1}}
-	weights["h.0.ln_1.bias"] = tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
-	weights["h.0.ln_2.weight"] = tensor{DType: "F32", Shape: []int{2}, Values: []float32{1, 1}}
-	weights["h.0.ln_2.bias"] = tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
-	weights["h.0.mlp.c_fc.weight"] = tensor{
+	weights["h.0.ln_1.weight"] = tensorpkg.Tensor{DType: "F32", Shape: []int{2}, Values: []float32{1, 1}}
+	weights["h.0.ln_1.bias"] = tensorpkg.Tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
+	weights["h.0.ln_2.weight"] = tensorpkg.Tensor{DType: "F32", Shape: []int{2}, Values: []float32{1, 1}}
+	weights["h.0.ln_2.bias"] = tensorpkg.Tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
+	weights["h.0.mlp.c_fc.weight"] = tensorpkg.Tensor{
 		DType: "F32", Shape: []int{2, 8},
 		Values: []float32{1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0},
 	}
-	weights["h.0.mlp.c_fc.bias"] = tensor{DType: "F32", Shape: []int{8}, Values: make([]float32, 8)}
-	weights["h.0.mlp.c_proj.weight"] = tensor{
+	weights["h.0.mlp.c_fc.bias"] = tensorpkg.Tensor{DType: "F32", Shape: []int{8}, Values: make([]float32, 8)}
+	weights["h.0.mlp.c_proj.weight"] = tensorpkg.Tensor{
 		DType: "F32", Shape: []int{8, 2},
 		Values: []float32{1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	}
-	weights["h.0.mlp.c_proj.bias"] = tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
+	weights["h.0.mlp.c_proj.bias"] = tensorpkg.Tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
 
 	got, err := calculateBlock(weights, GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 1, LayerNormEpsilon: 1e-5}, 0,
-		tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}})
+		tensorpkg.Tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}})
 	if err != nil {
 		t.Fatal(err)
 	}

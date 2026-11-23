@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"io"
 	"math"
 	"os"
@@ -24,7 +25,7 @@ var dtypeDecoders = map[string]dtypeDecoder{
 }
 
 // loadTensors reads every tensor in a safetensors file, with all of its numbers.
-func loadTensors(path string) (map[string]tensor, error) {
+func loadTensors(path string) (map[string]tensorpkg.Tensor, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -52,7 +53,7 @@ func loadTensors(path string) (map[string]tensor, error) {
 		return nil, err
 	}
 
-	tensors := make(map[string]tensor)
+	tensors := make(map[string]tensorpkg.Tensor)
 	for name, info := range header {
 		if name == "__metadata__" {
 			continue
@@ -66,7 +67,7 @@ func loadTensors(path string) (map[string]tensor, error) {
 		for i := range values {
 			values[i] = decoder.decode(raw[i*decoder.width:])
 		}
-		tensors[name] = tensor{DType: info.DType, Shape: info.Shape, Values: values}
+		tensors[name] = tensorpkg.Tensor{DType: info.DType, Shape: info.Shape, Values: values}
 	}
 	return tensors, nil
 }
