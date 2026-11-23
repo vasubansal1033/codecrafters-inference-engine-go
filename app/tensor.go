@@ -231,7 +231,7 @@ func (t tensor) softmax(dim int, temp float32) (tensor, error) {
 	return out, nil
 }
 
-func (t tensor) layerNorm(dim int) (tensor, error) {
+func (t tensor) layerNorm(dim int, eps float32) (tensor, error) {
 	if dim != 1 {
 		return tensor{}, fmt.Errorf("LayerNorm error: Invalid dimension %d passed for shape %v", dim, t.Shape)
 	}
@@ -267,8 +267,7 @@ func (t tensor) layerNorm(dim int) (tensor, error) {
 				variance += float32(math.Pow(float64(out.Values[j])-float64(mean), float64(2)))
 			}
 			variance /= float32(cols) // population variance
-			eps := 1e-5               // add eps to std dev for numerical stability
-			stdDev := math.Sqrt(float64(variance) + eps)
+			stdDev := math.Sqrt(float64(variance + eps))
 
 			// normalize
 			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {

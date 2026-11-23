@@ -54,7 +54,7 @@ func TestTensorOperations(t *testing.T) {
 	}
 	closeValues(t, probabilities.Values, []float32{0.26894143, 0.7310586}, 1e-6)
 
-	normalized, err := (tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}}).layerNorm(1)
+	normalized, err := (tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}}).layerNorm(1, 1e-5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestBlockGolden(t *testing.T) {
 	}
 	weights["h.0.mlp.c_proj.bias"] = tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
 
-	got, err := calculateBlock(weights, GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 1}, 0,
+	got, err := calculateBlock(weights, GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 1, LayerNormEpsilon: 1e-5}, 0,
 		tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}})
 	if err != nil {
 		t.Fatal(err)
