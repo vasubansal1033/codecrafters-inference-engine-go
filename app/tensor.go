@@ -266,7 +266,7 @@ func (t tensor) layerNorm(dim int) (tensor, error) {
 			for j := rowStartFlatIdx; j < rowEndFlatIdx+1; j++ {
 				variance += float32(math.Pow(float64(out.Values[j])-float64(mean), float64(2)))
 			}
-			variance /= float32(cols) // using unbiased variance
+			variance /= float32(cols) // population variance
 			eps := 1e-5               // add eps to std dev for numerical stability
 			stdDev := math.Sqrt(float64(variance) + eps)
 

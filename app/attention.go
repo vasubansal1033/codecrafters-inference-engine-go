@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	SQRT_TWO_OVER_PI float32 = 0.7978845608028654 // sqrt(2 / pi)
+	sqrtTwoOverPi float32 = 0.7978845608028654 // sqrt(2 / pi)
 )
 
 /*
@@ -114,13 +114,13 @@ func loadTokenConfig(path string) (TokenConfig, error) {
 	return tokenConfig, nil
 }
 
-func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
-	// fmt.Printf("config: %v\nlayer_num: %d\ninputs: %v", config, layer_num, inputs)
+func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
+	// fmt.Printf("config: %v\nlayerNum: %d\ninputs: %v", config, layerNum, inputs)
 
-	layerAttnWeights := tmap[fmt.Sprintf("h.%d.attn.c_attn.weight", layer_num)]
-	layerAttnBias := tmap[fmt.Sprintf("h.%d.attn.c_attn.bias", layer_num)]
-	layerProjWeights := tmap[fmt.Sprintf("h.%d.attn.c_proj.weight", layer_num)]
-	layerProjBias := tmap[fmt.Sprintf("h.%d.attn.c_proj.bias", layer_num)]
+	layerAttnWeights := tmap[fmt.Sprintf("h.%d.attn.c_attn.weight", layerNum)]
+	layerAttnBias := tmap[fmt.Sprintf("h.%d.attn.c_attn.bias", layerNum)]
+	layerProjWeights := tmap[fmt.Sprintf("h.%d.attn.c_proj.weight", layerNum)]
+	layerProjBias := tmap[fmt.Sprintf("h.%d.attn.c_proj.bias", layerNum)]
 
 	/*
 		TENSOR CALCULATION:
@@ -155,12 +155,11 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 		return tensor{}, err
 	}
 
-	// n_pos := config.NumberOfPositions
-	n_pos := inputTensor.Shape[0]
-	n_embd := config.NumberOfEmbeddings
-	n_heads := config.NumberOfHeads
-	if n_heads <= 0 || n_embd%n_heads != 0 {
-		return tensor{}, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", n_embd, n_heads)
+	numPositions := inputTensor.Shape[0]
+	numEmbeddings := config.NumberOfEmbeddings
+	numHeads := config.NumberOfHeads
+	if numHeads <= 0 || numEmbeddings%numHeads != 0 {
+		return tensor{}, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", numEmbeddings, numHeads)
 	}
 
 	// MHA calculation
@@ -172,16 +171,16 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 			Qi -> (n_pos, head_dim) where head_dim = n_embd/n_heads
 			Q = [Q1 | Q2 .... | Qn_heads]
 	*/
-	head_dim := n_embd / n_heads
+	headDim := numEmbeddings / numHeads
 	attended := tensor{
 		DType:  add.DType,
-		Shape:  []int{n_pos, n_embd},
-		Values: make([]float32, n_pos*n_embd),
+		Shape:  []int{numPositions, numEmbeddings},
+		Values: make([]float32, numPositions*numEmbeddings),
 	}
 
 	// attention for hth head
-	for h := 0; h < n_heads; h++ {
-		score, V, err := calculateScore(add, n_pos, n_embd, n_heads, h)
+	for h := 0; h < numHeads; h++ {
+		score, V, err := calculateScore(add, numPositions, numEmbeddings, numHeads, h)
 		if err != nil {
 			return tensor{}, err
 		}
@@ -203,9 +202,9 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 
 		// placing this sub-head's attention (n_pos, n_embd/n_head)
 		// in over head's attention (n_pos, n_embd)
-		for i := 0; i < n_pos; i++ {
-			dst := i*n_embd + h*head_dim
-			copy(attended.Values[dst:dst+head_dim], headOut.Values[i*head_dim:(i+1)*head_dim])
+		for i := 0; i < numPositions; i++ {
+			dst := i*numEmbeddings + h*headDim
+			copy(attended.Values[dst:dst+headDim], headOut.Values[i*headDim:(i+1)*headDim])
 		}
 	}
 
@@ -222,15 +221,15 @@ func calculateAttention(tmap map[string]tensor, config GPT2Config, layer_num int
 	return res, nil
 }
 
-func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
+func calculateBlock(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
 	layerNorm, err := inputTensor.layerNorm(1)
 	if err != nil {
 		return tensor{}, err
 	}
 
 	// apply layer norm-1 wandb
-	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_1.weight", layer_num)]
-	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_1.bias", layer_num)]
+	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_1.weight", layerNum)]
+	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_1.bias", layerNum)]
 
 	layerNorm, err = layerNorm.broadcastMultiply(layerNormWeights)
 	if err != nil {
@@ -245,7 +244,7 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 	attn, err := calculateAttention(
 		tmap,
 		config,
-		layer_num,
+		layerNum,
 		layerNorm,
 	)
 	if err != nil {
@@ -257,7 +256,7 @@ func calculateBlock(tmap map[string]tensor, config GPT2Config, layer_num int, in
 		return tensor{}, err
 	}
 
-	resOutput, err = performMLP(tmap, config, layer_num, resOutput)
+	resOutput, err = performMLP(tmap, config, layerNum, resOutput)
 	if err != nil {
 		return tensor{}, err
 	}
@@ -356,34 +355,34 @@ func performGeneration(tmap map[string]tensor, config GPT2Config, tokenConfig To
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
 // In MHA performs calculation for Qh, Kh, Vh
-func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (tensor, tensor, error) {
+func calculateScore(t tensor, numPositions int, numEmbeddings int, numHeads int, head int) (tensor, tensor, error) {
 	tshape := t.Shape
-	if len(tshape) != 2 || n_pos < 0 || n_embd <= 0 || n_heads <= 0 || head < 0 || head >= n_heads || n_embd%n_heads != 0 || tshape[0] != n_pos || tshape[1] != 3*n_embd || len(t.Values) < n_pos*3*n_embd {
-		return tensor{}, tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, n_pos, n_embd, n_heads)
+	if len(tshape) != 2 || numPositions < 0 || numEmbeddings <= 0 || numHeads <= 0 || head < 0 || head >= numHeads || numEmbeddings%numHeads != 0 || tshape[0] != numPositions || tshape[1] != 3*numEmbeddings || len(t.Values) < numPositions*3*numEmbeddings {
+		return tensor{}, tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, numPositions, numEmbeddings, numHeads)
 	}
 
 	q := tensor{
 		DType:  t.DType,
-		Shape:  []int{n_pos, n_embd},
-		Values: make([]float32, n_pos*n_embd),
+		Shape:  []int{numPositions, numEmbeddings},
+		Values: make([]float32, numPositions*numEmbeddings),
 	}
 	k := tensor{
 		DType:  t.DType,
-		Shape:  []int{n_pos, n_embd},
-		Values: make([]float32, n_pos*n_embd),
+		Shape:  []int{numPositions, numEmbeddings},
+		Values: make([]float32, numPositions*numEmbeddings),
 	}
 	v := tensor{
 		DType:  t.DType,
-		Shape:  []int{n_pos, n_embd},
-		Values: make([]float32, n_pos*n_embd),
+		Shape:  []int{numPositions, numEmbeddings},
+		Values: make([]float32, numPositions*numEmbeddings),
 	}
 
-	stride := 3 * n_embd
-	for i := 0; i < n_pos; i++ {
+	stride := 3 * numEmbeddings
+	for i := 0; i < numPositions; i++ {
 		row := t.Values[i*stride : (i+1)*stride]
-		copy(q.Values[i*n_embd:(i+1)*n_embd], row[:n_embd])
-		copy(k.Values[i*n_embd:(i+1)*n_embd], row[n_embd:2*n_embd])
-		copy(v.Values[i*n_embd:(i+1)*n_embd], row[2*n_embd:3*n_embd])
+		copy(q.Values[i*numEmbeddings:(i+1)*numEmbeddings], row[:numEmbeddings])
+		copy(k.Values[i*numEmbeddings:(i+1)*numEmbeddings], row[numEmbeddings:2*numEmbeddings])
+		copy(v.Values[i*numEmbeddings:(i+1)*numEmbeddings], row[2*numEmbeddings:3*numEmbeddings])
 	}
 
 	// q, k, v are sliced heads representing the head indexed "head" argument
@@ -396,9 +395,9 @@ func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (ten
 		K -> [k0|k1|...|km]
 		V -> [v0|v1|...|vm]
 	*/
-	head_dim := n_embd / n_heads
+	headDim := numEmbeddings / numHeads
 	// q, k, v actually are qi's above
-	q, k, v = sliceHead(q, head, head_dim), sliceHead(k, head, head_dim), sliceHead(v, head, head_dim)
+	q, k, v = sliceHead(q, head, headDim), sliceHead(k, head, headDim), sliceHead(v, head, headDim)
 
 	kT, err := k.transpose()
 	if err != nil {
@@ -409,15 +408,15 @@ func calculateScore(t tensor, n_pos int, n_embd int, n_heads int, head int) (ten
 		return tensor{}, tensor{}, err
 	}
 	// Dot is over key_dim = n_embd/n_heads.
-	dK := float32(head_dim)
+	dK := float32(headDim)
 	res, err := qk.scale(1 / float32(math.Sqrt(float64(dK))))
 	return res, v, err
 }
 
-func performMLP(tmap map[string]tensor, config GPT2Config, layer_num int, inputTensor tensor) (tensor, error) {
+func performMLP(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {
 	// apply layer norm-2 wandb
-	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_2.weight", layer_num)]
-	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_2.bias", layer_num)]
+	layerNormWeights := tmap[fmt.Sprintf("h.%d.ln_2.weight", layerNum)]
+	layerNormBias := tmap[fmt.Sprintf("h.%d.ln_2.bias", layerNum)]
 
 	inputTensorLayerNormed, err := inputTensor.layerNorm(1)
 	if err != nil {
@@ -434,8 +433,8 @@ func performMLP(tmap map[string]tensor, config GPT2Config, layer_num int, inputT
 	}
 
 	// apply MLP weights
-	mlpWeights := tmap[fmt.Sprintf("h.%d.mlp.c_fc.weight", layer_num)]
-	mlpBias := tmap[fmt.Sprintf("h.%d.mlp.c_fc.bias", layer_num)]
+	mlpWeights := tmap[fmt.Sprintf("h.%d.mlp.c_fc.weight", layerNum)]
+	mlpBias := tmap[fmt.Sprintf("h.%d.mlp.c_fc.bias", layerNum)]
 
 	mlpOutput, err := layerNormOutput.matmul(mlpWeights)
 	if err != nil {
@@ -452,8 +451,8 @@ func performMLP(tmap map[string]tensor, config GPT2Config, layer_num int, inputT
 	}
 
 	// apply MLP projection
-	mlpProjWeights := tmap[fmt.Sprintf("h.%d.mlp.c_proj.weight", layer_num)]
-	mlpProjBias := tmap[fmt.Sprintf("h.%d.mlp.c_proj.bias", layer_num)]
+	mlpProjWeights := tmap[fmt.Sprintf("h.%d.mlp.c_proj.weight", layerNum)]
+	mlpProjBias := tmap[fmt.Sprintf("h.%d.mlp.c_proj.bias", layerNum)]
 
 	mlpOutput, err = mlpOutput.matmul(mlpProjWeights)
 	if err != nil {
@@ -472,16 +471,16 @@ func performMLP(tmap map[string]tensor, config GPT2Config, layer_num int, inputT
 	return mlpOutput, nil
 }
 
-func sliceHead(t tensor, head int, head_dim int) tensor {
-	n_pos, n_embd := t.Shape[0], t.Shape[1]
-	start := head * head_dim
+func sliceHead(t tensor, head int, headDim int) tensor {
+	numPositions, numEmbeddings := t.Shape[0], t.Shape[1]
+	start := head * headDim
 	out := tensor{
 		DType:  t.DType,
-		Shape:  []int{n_pos, head_dim},
-		Values: make([]float32, n_pos*head_dim),
+		Shape:  []int{numPositions, headDim},
+		Values: make([]float32, numPositions*headDim),
 	}
-	for i := 0; i < n_pos; i++ {
-		copy(out.Values[i*head_dim:(i+1)*head_dim], t.Values[i*n_embd+start:i*n_embd+start+head_dim])
+	for i := 0; i < numPositions; i++ {
+		copy(out.Values[i*headDim:(i+1)*headDim], t.Values[i*numEmbeddings+start:i*numEmbeddings+start+headDim])
 	}
 	return out
 }
@@ -509,5 +508,5 @@ func applyCausalMask(t tensor) error {
 // geluApprox(x) = 0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x^3)))
 func geluApprox(x float32) float32 {
 	X := float64(x)
-	return 0.5 * x * (1 + float32(math.Tanh(float64(SQRT_TWO_OVER_PI)*(X+(float64(0.044715)*math.Pow(X, float64(3)))))))
+	return 0.5 * x * (1 + float32(math.Tanh(float64(sqrtTwoOverPi)*(X+(float64(0.044715)*math.Pow(X, float64(3)))))))
 }

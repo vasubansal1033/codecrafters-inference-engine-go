@@ -39,18 +39,18 @@ func embedTokenIds(tmap map[string]tensor, tokenIds []int) (tensor, error) {
 		embedding = append(embedding, mergedEmbedding...)
 	}
 
-	n_embd := len(embedding) / numTokenIds
+	numEmbeddings := len(embedding) / numTokenIds
 
 	return tensor{
 		DType:  "F32",
-		Shape:  []int{numTokenIds, n_embd},
+		Shape:  []int{numTokenIds, numEmbeddings},
 		Values: embedding,
 	}, nil
 }
 
 func addTokenIdEmbedding(tmap map[string]tensor, inputTensor tensor, tokenId int) (tensor, error) {
 	numTokenIds := inputTensor.Shape[0]
-	n_embd := inputTensor.Shape[1]
+	numEmbeddings := inputTensor.Shape[1]
 
 	tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
 	if err != nil {
@@ -71,7 +71,7 @@ func addTokenIdEmbedding(tmap map[string]tensor, inputTensor tensor, tokenId int
 
 	return tensor{
 		DType:  "F32",
-		Shape:  []int{numTokenIds + 1, n_embd},
+		Shape:  []int{numTokenIds + 1, numEmbeddings},
 		Values: values,
 	}, nil
 }

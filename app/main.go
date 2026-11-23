@@ -100,7 +100,7 @@ func main() {
 
 		layerNum, err := strconv.Atoi(layerNumInput)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while parisng layer number: %s\n", err)
+			fmt.Fprintf(os.Stderr, "Error while parsing layer number: %s\n", err)
 			os.Exit(1)
 		}
 
@@ -152,7 +152,7 @@ func main() {
 
 		layerNum, err := strconv.Atoi(layerNumInput)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while parisng layer number: %s\n", err)
+			fmt.Fprintf(os.Stderr, "Error while parsing layer number: %s\n", err)
 			os.Exit(1)
 		}
 
