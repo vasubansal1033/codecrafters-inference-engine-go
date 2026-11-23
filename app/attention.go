@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -48,35 +47,12 @@ type TokenConfig struct {
 }
 
 func loadConfig(path string) (GPT2Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return GPT2Config{}, err
-	}
-	defer f.Close()
-
-	reader := bufio.NewReader(f)
-	decoder := json.NewDecoder(reader)
-
-	config := GPT2Config{}
-	if err := decoder.Decode(&config); err != nil {
-		return GPT2Config{}, err
-	}
-
-	return config, nil
+	return readJSON[GPT2Config](path)
 }
 
 func loadInputRows(path string) (tensor, error) {
-	f, err := os.Open(path)
+	inputRows, err := readJSON[[][]float32](path)
 	if err != nil {
-		return tensor{}, err
-	}
-	defer f.Close()
-
-	reader := bufio.NewReader(f)
-	decoder := json.NewDecoder(reader)
-
-	var inputRows [][]float32
-	if err := decoder.Decode(&inputRows); err != nil {
 		return tensor{}, err
 	}
 
@@ -97,21 +73,17 @@ func loadInputRows(path string) (tensor, error) {
 }
 
 func loadTokenConfig(path string) (TokenConfig, error) {
-	f, err := os.Open(path)
+	return readJSON[TokenConfig](path)
+}
+
+func readJSON[T any](path string) (T, error) {
+	var value T
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return TokenConfig{}, err
+		return value, err
 	}
-	defer f.Close()
-
-	reader := bufio.NewReader(f)
-	decoder := json.NewDecoder(reader)
-
-	var tokenConfig TokenConfig
-	if err := decoder.Decode(&tokenConfig); err != nil {
-		return TokenConfig{}, err
-	}
-
-	return tokenConfig, nil
+	err = json.Unmarshal(data, &value)
+	return value, err
 }
 
 func calculateAttention(tmap map[string]tensor, config GPT2Config, layerNum int, inputTensor tensor) (tensor, error) {

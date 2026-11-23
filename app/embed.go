@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 )
 
@@ -125,19 +122,5 @@ func mergeTokenAndPosEmbeddings(tokenEmbedding []float32, posEmbedding []float32
 }
 
 func loadTokenIds(path string) ([]int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	reader := bufio.NewReader(f)
-	decoder := json.NewDecoder(reader)
-
-	var ids []int
-	if err = decoder.Decode(&ids); err != nil {
-		return nil, err
-	}
-
-	return ids, nil
+	return readJSON[[]int](path)
 }
