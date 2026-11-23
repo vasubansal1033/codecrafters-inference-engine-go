@@ -1,137 +1,75 @@
-This repository is a Go program for the CodeCrafters "Build Your Own Inference Engine" challenge. It loads GPT-2 weights from a safetensors file, embeds token ids, runs multi-head attention for one layer, and runs the attention half of one transformer block. The longest section below is how `add` and `broadcastMultiply` line a matrix up with a vector. The shapes and formulas were checked against `app/tensor.go`, `app/attention.go`, `app/main.go`, and `go.mod` (`go 1.26.0`) on 22 November 2026.
+## Inference engine
 
-## What is implemented
+This repository implements the CodeCrafters inference engine challenge in Go. GPT-2 is the first registered model, while tensor math, safetensors loading, neural-network layers, generation, and the command line remain model-independent.
 
-`inspect` lists every tensor name with its dtype, shape, and first few values. `embed` looks up one row of `wte.weight` per token id and one row of `wpe.weight` per position, then adds those two rows element by element. That addition lives in `mergeTokenAndPosEmbeddings` and only accepts two slices of equal length. `attn` runs one attention layer on a JSON matrix of rows. `block` layer-normalizes those rows, applies `ln_1`, runs attention, and adds the attention output back onto the original rows.
+The implementation keeps the arithmetic explicit. Attention still shows the score, causal mask, softmax, value product, head merge, and output projection in order. The reusable packages provide each operation without hiding that flow.
 
-A tensor is a flat `[]float32` plus a shape, stored row by row. Shape `[n]` is a single list of `n` numbers. Shape `[m, n]` is `m` rows of `n` numbers. `getFlatArrayIdx` reads a shape `[n]` as one row of `n` columns, and it rejects a negative index or an index past the row or column count.
-
-## Broadcasting
-
-> Note. In GPT-2 the internal weights (`c_attn`, `c_proj`, and the MLP matrices) are matrix products, done by `matmul`. Layer-norm scales (`ln_1.weight`, `ln_2.weight`, `ln_f.weight`) are vectors, one scale per column, multiplied onto every token by `broadcastMultiply`. `add` is only the broadcast, so it stays one function. The pictures are in [concepts.md](concepts.md#what-multiply-does), under What multiply does.
-
-GPT-2 stores several parameters as one list whose length is the embedding size: `h.{layer}.attn.c_attn.bias`, `h.{layer}.attn.c_proj.bias`, `h.{layer}.ln_1.weight`, and `h.{layer}.ln_1.bias`. A forward pass has one row per token, so the activation is `[n_pos, n_embd]`, or `[n_pos, 3*n_embd]` after the fused query, key, and value projection. The vector has to meet every row. That stretch is the broadcast.
-
-`c_attn.weight` is `[n_embd, 3*n_embd]`, and the forward step is the activation times that matrix, through `matmul`. A one-token prompt is `[1, n_embd]`. That single row is a real product with the weight. The caller names `matmul` for that product. `broadcastMultiply` is the other function, used when the right-hand side is a per-column scale such as `ln_1.weight`.
-
-#### The shared row-repeat steps
-
-`add` and `broadcastMultiply` follow the same steps. `add` uses `+=`. `broadcastMultiply` uses `*=`. Both methods take the receiver by value, so the rewrites below happen on a copy.
-
-1. Record whether both arguments started with a one-dimensional shape.
-2. Save the left tensor's dtype. A later swap must leave the result reporting that dtype.
-3. Read a shape `[n]` as one row, `[1, n]`.
-4. Both sides must now have two dimensions, both rows must have the same width, and the row counts must match or one side must have exactly one row. Anything else returns `Addition error` or `Multiplication error` with the two shapes.
-5. If the left side is the single row and the right side has more rows, swap the arguments. After this step the values that get copied are always on the right.
-6. If the right side has one row and the left side has several, allocate a new buffer and copy that row once for each left-hand row.
-7. Clone the left-hand values into the result, then add or multiply the right-hand value at the same position.
-8. When both arguments started as shape `[n]`, set the result shape back to `[n]`. The extra dimension existed so the row logic could treat every input the same way.
-
-The clone in step 7 is required because a value receiver copies the struct, including the slice header, and that header still points at the caller's array. Writing into `Values` without cloning would change the tensor the caller passed in. Replacing `Shape` with a newly allocated slice stays on the copy, which is why step 3 leaves the caller unchanged.
-
-`applyCausalMask` is the method that writes through that shared array on purpose. It sets `score[i][j]` to negative infinity when `j > i`, and the diagonal stays. The caller's score tensor sees those writes.
-
-#### A worked broadcastMultiply of a vector
-
-Left operand, shape `[2, 3]`:
+## Package layout
 
 ```text
-1 2 3
-4 5 6
+app/main.go                    thin process entry point
+internal/cli/                  command table, input files, JSON output
+internal/generate/             model-independent greedy generation
+internal/models/               Model interface, registry, shared logits loop
+internal/models/gpt2/          GPT-2 configuration, weights, and forward pass
+internal/nn/                   reusable layers and attention helpers
+internal/safetensors/          safetensors file loader
+internal/tensor/               tensor type and arithmetic
 ```
 
-Right operand, shape `[3]`: `10, 20, 30`.
+`internal/models.Model` is the boundary between shared orchestration and model-specific math:
 
-`broadcastMultiply` reads a shape `[3]` as one row of width 3. The widths match, and the right side has one row, so that row is copied twice:
-
-```text
-10 20 30
-10 20 30
+```go
+type Model interface {
+	NumLayers() int
+	Embed(ids []int) (tensor.Tensor, error)
+	Attention(layer int, input tensor.Tensor) (tensor.Tensor, error)
+	Block(layer int, input tensor.Tensor) (tensor.Tensor, error)
+	Head(last tensor.Tensor) (tensor.Tensor, error)
+}
 ```
 
-Position-wise multiplication produces:
+`models.Logits` applies every block, selects the final position, and calls the model's output head. `generate.Greedy` re-embeds the complete token sequence on each step, calls that shared logits loop, and appends the highest-scoring token. For example, generating two tokens from `[10, 20]` evaluates `[10, 20]`, appends the first result, then evaluates `[10, 20, result]`.
 
-```text
-10  40  90
-40 100 180
-```
-
-The result shape is `[2, 3]`. The caller's tensor is still `[2, 3]` holding `1, 2, 3, 4, 5, 6`.
-
-The same alignment with addition produces `11, 22, 33` on the first row and `14, 25, 36` on the second.
-
-Two length-3 vectors, `1, 2, 3` and `4, 5, 6`, take this path as well. The arithmetic gives `4, 10, 18`, and step 8 folds the shape back to `[3]`.
-
-#### When the call is matmul
-
-`matmul` runs when the caller passes two matrices whose inner sizes match. The value at result row `i`, column `j` is the sum of `left[i][k] * right[k][j]` over that shared dimension. The result shape is `[left rows, right columns]`.
-
-A one-token case:
-
-```text
-left  shape [1, 2]  values 1, 2
-right shape [2, 2]  values 3, 4, 5, 6
-```
-
-The right-hand matrix is:
-
-```text
-3 4
-5 6
-```
-
-The inner sizes match, so `matmul` returns `1*3 + 2*5 = 13` and `1*4 + 2*6 = 16`, with shape `[1, 2]`. A one-token prompt times `c_proj.weight` (shape `[n_embd, n_embd]`) is this call. The rows have the same width and one side has a single row, which is also a legal input to `broadcastMultiply`, so the caller has to pick `matmul` for the projection.
-
-#### Where each call lands in the block
-
-`calculateBlock` normalizes each input row, multiplies by `ln_1.weight`, adds `ln_1.bias`, runs attention on those rows, and adds the attention output onto the row it started from.
-
-- `ln_1.weight` has shape `[n_embd]`. `broadcastMultiply` scales each column of the normalized rows.
-- `ln_1.bias`, `c_attn.bias`, and `c_proj.bias` are vectors. `add` broadcasts each one across rows.
-- `input` times `c_attn.weight`, `attended` times `c_proj.weight`, `Q` times `K` transposed, and the softmax scores times `V` are `matmul` calls.
-
-`layerNorm` works per row. It subtracts the row mean and divides by the square root of (the mean of squared deviations plus `1e-5`). The mean of those squared deviations divides by the row length. The comment on that line calls the variance unbiased; the divisor in the code is the row length. Gamma and beta are applied afterwards, by the broadcast multiply and the broadcast add, so they sit outside `layerNorm`.
-
-Attention takes the position count from `inputTensor.Shape[0]`. `n_positions` in the config is the context length the model was built with, and a short prompt has fewer rows than that.
-
-The feed-forward tensors for a block (`ln_2`, `mlp.c_fc`, `mlp.c_proj`) are in the weight file. `calculateBlock` does not read them.
-
-Multi-head attention splits the fused `[n_pos, 3*n_embd]` row into Q, K, and V, then takes a contiguous column block of width `n_embd/n_heads` for each head. The score is `Q K^T / sqrt(head_dim)`. The mask, the row softmax, the multiply by V, and the write into the concatenated result stay in `calculateAttention`, in that order. `sliceHead` copies one head's columns into a new `[n_pos, head_dim]` tensor.
-
-## Layout
-
-- `app/main.go` switches on `inspect`, `embed`, `attn`, and `block`.
-- `app/safetensors.go` reads the weight file.
-- `app/embed.go` looks up token and position rows.
-- `app/tensor.go` holds the tensor operations, including both broadcast paths.
-- `app/attention.go` holds the config loader, multi-head attention, the causal mask, and the block.
-
-`your_program.sh` builds with `go build` on `app/*.go`. Each file is `package main`.
-
-## Running
+## Running commands
 
 ```sh
 ./your_program.sh inspect model.safetensors
 ./your_program.sh embed model.safetensors ids.json
 ./your_program.sh attn model.safetensors config.json 0 input.json
 ./your_program.sh block model.safetensors config.json 0 input.json
-codecrafters submit
+./your_program.sh logits model.safetensors config.json ids.json
+./your_program.sh generate model.safetensors config.json ids.json tokens.json
 ```
 
-The full GPT-2 weight file is about 548 MB. Download it outside this repository so it does not end up in a commit:
+The entry point remains compatible with the CodeCrafters build script, which builds `app/*.go`.
+
+## Verification
+
+Run the same checks used after each refactor commit:
 
 ```sh
-mkdir -p /tmp/testing && cd /tmp/testing
-curl -L -o model.safetensors https://huggingface.co/openai-community/gpt2/resolve/main/model.safetensors
+test -z "$(gofmt -l .)"
+go vet ./...
+go build app/*.go
+go test ./...
 ```
 
-## When a shape goes wrong
+Set `GPT2_MODEL` to a real `model.safetensors` file to enable the optional logits and generation regression. Put the matching `config.json` in the same directory.
+
+## Adding a model
+
+Create a package such as `internal/models/llama` and implement `models.Model`. The package owns its configuration, tensor names, embedding rules, attention, blocks, and output head. Register its constructor in `internal/models/models.go` under the `model_type` stored in its configuration.
+
+Shared packages should only gain operations that another model can reuse. A Llama implementation would add `RMSNorm`, `SiLU`, and rotary position embeddings to `internal/nn`. Its constructor can transpose Hugging Face weights once if their layout differs from the layout accepted by `nn.Linear`. GPT-2 code does not need to change.
+
+Safetensors support for a new numeric format belongs in the decoder table in `internal/safetensors`. Sampling strategies belong beside `generate.Greedy`, rather than inside a model package.
+
+## When something fails
 
 | What you see | What is causing it |
 | --- | --- |
-| `Multiplication error: invalid shapes [2 3] x [2 2]` | `matmul` was called with inner sizes 3 and 2. |
-| `Addition error: invalid shapes [2 3] + [4]` | After `[4]` is viewed as `[1, 4]`, the row widths are 3 and 4. `add` has no second interpretation of the shapes. |
-| A one-token projection comes out shaped like the weight matrix, with each column scaled | The projection was sent to `broadcastMultiply`. `c_proj.weight` is a matrix product, so that call is `matmul`. |
-| The tensor passed into `add` or into `broadcastMultiply` has different values afterwards | The result wrote into `Values` without cloning. The copied slice header still points at the caller's array. |
-| Layer-norm of `[[1, 2]]` is about `0.00199598` in the first column | The denominator was `sqrt(variance) + eps`. `layerNorm` now divides by `sqrt(variance + 1e-5)`. |
-| `invalid dims provided: [2 6], whereas n_pos: 4` | The position count was `n_positions` from the config. A two-row prompt has to use `inputTensor.Shape[0]`, which `calculateAttention` does. |
+| `unsupported model_type` | The configuration names a model that has no builder in the registry. |
+| A matrix multiplication shape error | A model supplied weights in a different `[in, out]` layout from `nn.Linear`. |
+| A missing command argument prints usage | The command table validates each command's argument list before running it. |
+| The optional real-model test is skipped | `GPT2_MODEL` is not set. |
