@@ -333,8 +333,25 @@ func calculateLogits(tmap map[string]tensor, config GPT2Config, inputTensor tens
 	return logits, nil
 }
 
-func performGeneration(tmap map[string]tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensor) (tensor, error) {
-	return tensor{}, fmt.Errorf("Generation not implemented yet")
+func performGeneration(tmap map[string]tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensor) ([]int, error) {
+
+	generatedIds := []int{}
+	for range tokenConfig.Count {
+		logits, err := calculateLogits(tmap, config, inputTensor)
+		if err != nil {
+			return []int{}, err
+		}
+
+		maxLogitIdx := slices.Index(logits.Values, slices.Max(logits.Values))
+		generatedIds = append(generatedIds, maxLogitIdx)
+		inputTensor, err = addTokenIdEmbedding(tmap, inputTensor, maxLogitIdx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return generatedIds, nil
+
 }
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V

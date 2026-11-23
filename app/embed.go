@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 )
 
 /*
@@ -44,6 +45,34 @@ func embedTokenIds(tmap map[string]tensor, tokenIds []int) (tensor, error) {
 		DType:  "F32",
 		Shape:  []int{numTokenIds, n_embd},
 		Values: embedding,
+	}, nil
+}
+
+func addTokenIdEmbedding(tmap map[string]tensor, inputTensor tensor, tokenId int) (tensor, error) {
+	numTokenIds := inputTensor.Shape[0]
+	n_embd := inputTensor.Shape[1]
+
+	tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
+	if err != nil {
+		return tensor{}, err
+	}
+	posEmbedding, err := getEmbeddingFromTensorValues(tmap["wpe.weight"], numTokenIds)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	// merge the two embeddings
+	mergedEmbedding, err := mergeTokenAndPosEmbeddings(tokenEmbedding, posEmbedding)
+	if err != nil {
+		return tensor{}, err
+	}
+
+	values := append(slices.Clone(inputTensor.Values), mergedEmbedding...)
+
+	return tensor{
+		DType:  "F32",
+		Shape:  []int{numTokenIds + 1, n_embd},
+		Values: values,
 	}, nil
 }
 

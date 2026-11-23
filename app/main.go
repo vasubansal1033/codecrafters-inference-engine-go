@@ -282,7 +282,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		logitJson, err := json.Marshal(generatedOutput.get2DArray()[0])
+		logitJson, err := json.Marshal(generatedOutput)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding generation output: %s\n", err)
 			os.Exit(1)
