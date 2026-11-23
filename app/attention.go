@@ -3,14 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/nn"
 	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"math"
 	"os"
 	"slices"
-)
-
-const (
-	sqrtTwoOverPi float32 = 0.7978845608028654 // sqrt(2 / pi)
 )
 
 /*
@@ -87,26 +84,6 @@ func readJSON[T any](path string) (T, error) {
 	return value, err
 }
 
-func linear(input, weights, bias tensorpkg.Tensor) (tensorpkg.Tensor, error) {
-	output, err := input.MatMul(weights)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-	return output.Add(bias)
-}
-
-func layerNormAffine(input, weights, bias tensorpkg.Tensor, eps float32) (tensorpkg.Tensor, error) {
-	output, err := input.LayerNorm(1, eps)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-	output, err = output.BroadcastMultiply(weights)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-	return output.Add(bias)
-}
-
 type layerWeights struct {
 	attnWeight, attnBias tensorpkg.Tensor
 	attnProjWeight       tensorpkg.Tensor
@@ -162,7 +139,7 @@ func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 			= (num_pos, n_embd)
 	*/
 
-	add, err := linear(inputTensor, weights.attnWeight, weights.attnBias)
+	add, err := (nn.Linear{W: weights.attnWeight, B: &weights.attnBias}).Forward(inputTensor)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
@@ -183,12 +160,7 @@ func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 			Qi -> (n_pos, head_dim) where head_dim = n_embd/n_heads
 			Q = [Q1 | Q2 .... | Qn_heads]
 	*/
-	headDim := numEmbeddings / numHeads
-	attended := tensorpkg.Tensor{
-		DType:  add.DType,
-		Shape:  []int{numPositions, numEmbeddings},
-		Values: make([]float32, numPositions*numEmbeddings),
-	}
+	headOutputs := make([]tensorpkg.Tensor, 0, numHeads)
 
 	// attention for hth head
 	for h := 0; h < numHeads; h++ {
@@ -196,7 +168,7 @@ func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 		if err != nil {
 			return tensorpkg.Tensor{}, err
 		}
-		err = applyCausalMask(score)
+		score, err = nn.CausalMask(score)
 		if err != nil {
 			return tensorpkg.Tensor{}, err
 		}
@@ -212,15 +184,14 @@ func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 			return tensorpkg.Tensor{}, err
 		}
 
-		// placing this sub-head's attention (n_pos, n_embd/n_head)
-		// in over head's attention (n_pos, n_embd)
-		for i := 0; i < numPositions; i++ {
-			dst := i*numEmbeddings + h*headDim
-			copy(attended.Values[dst:dst+headDim], headOut.Values[i*headDim:(i+1)*headDim])
-		}
+		headOutputs = append(headOutputs, headOut)
 	}
 
-	res, err := linear(attended, weights.attnProjWeight, weights.attnProjBias)
+	attended, err := nn.MergeHeads(headOutputs)
+	if err != nil {
+		return tensorpkg.Tensor{}, err
+	}
+	res, err := (nn.Linear{W: weights.attnProjWeight, B: &weights.attnProjBias}).Forward(attended)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
@@ -230,7 +201,7 @@ func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 
 func calculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	weights := weightsForLayer(tmap, layerNum)
-	layerNorm, err := layerNormAffine(inputTensor, weights.ln1Weight, weights.ln1Bias, config.LayerNormEpsilon)
+	layerNorm, err := (nn.LayerNorm{W: weights.ln1Weight, B: weights.ln1Bias, Eps: config.LayerNormEpsilon}).Forward(inputTensor)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
@@ -287,7 +258,7 @@ func calculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputT
 	layerNormWeights := tmap["ln_f.weight"]
 	layerNormBias := tmap["ln_f.bias"]
 
-	lastAttendedEmbedding, err := layerNormAffine(lastAttendedEmbedding, layerNormWeights, layerNormBias, config.LayerNormEpsilon)
+	lastAttendedEmbedding, err := (nn.LayerNorm{W: layerNormWeights, B: layerNormBias, Eps: config.LayerNormEpsilon}).Forward(lastAttendedEmbedding)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
@@ -380,9 +351,19 @@ func calculateScore(t tensorpkg.Tensor, numPositions int, numEmbeddings int, num
 		K -> [k0|k1|...|km]
 		V -> [v0|v1|...|vm]
 	*/
-	headDim := numEmbeddings / numHeads
-	// q, k, v actually are qi's above
-	q, k, v = sliceHead(q, head, headDim), sliceHead(k, head, headDim), sliceHead(v, head, headDim)
+	qHeads, err := nn.SplitHeads(q, numHeads)
+	if err != nil {
+		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+	}
+	kHeads, err := nn.SplitHeads(k, numHeads)
+	if err != nil {
+		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+	}
+	vHeads, err := nn.SplitHeads(v, numHeads)
+	if err != nil {
+		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+	}
+	q, k, v = qHeads[head], kHeads[head], vHeads[head]
 
 	kT, err := k.Transpose()
 	if err != nil {
@@ -393,31 +374,29 @@ func calculateScore(t tensorpkg.Tensor, numPositions int, numEmbeddings int, num
 		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
 	}
 	// Dot is over key_dim = n_embd/n_heads.
-	dK := float32(headDim)
+	dK := float32(numEmbeddings / numHeads)
 	res, err := qk.Scale(1 / float32(math.Sqrt(float64(dK))))
 	return res, v, err
 }
 
 func performMLP(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	weights := weightsForLayer(tmap, layerNum)
-	layerNormOutput, err := layerNormAffine(inputTensor, weights.ln2Weight, weights.ln2Bias, config.LayerNormEpsilon)
+	layerNormOutput, err := (nn.LayerNorm{W: weights.ln2Weight, B: weights.ln2Bias, Eps: config.LayerNormEpsilon}).Forward(inputTensor)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
 
 	// apply MLP weights
-	mlpOutput, err := linear(layerNormOutput, weights.mlpWeight, weights.mlpBias)
+	mlpOutput, err := (nn.Linear{W: weights.mlpWeight, B: &weights.mlpBias}).Forward(layerNormOutput)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
 
 	// apply gelu approx. which is element wise operation
-	for i := 0; i < len(mlpOutput.Values); i++ {
-		mlpOutput.Values[i] = geluApprox(mlpOutput.Values[i])
-	}
+	mlpOutput = nn.GELU(mlpOutput)
 
 	// apply MLP projection
-	mlpOutput, err = linear(mlpOutput, weights.mlpProjWeight, weights.mlpProjBias)
+	mlpOutput, err = (nn.Linear{W: weights.mlpProjWeight, B: &weights.mlpProjBias}).Forward(mlpOutput)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
@@ -428,44 +407,4 @@ func performMLP(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum in
 	}
 
 	return mlpOutput, nil
-}
-
-func sliceHead(t tensorpkg.Tensor, head int, headDim int) tensorpkg.Tensor {
-	numPositions, numEmbeddings := t.Shape[0], t.Shape[1]
-	start := head * headDim
-	out := tensorpkg.Tensor{
-		DType:  t.DType,
-		Shape:  []int{numPositions, headDim},
-		Values: make([]float32, numPositions*headDim),
-	}
-	for i := 0; i < numPositions; i++ {
-		copy(out.Values[i*headDim:(i+1)*headDim], t.Values[i*numEmbeddings+start:i*numEmbeddings+start+headDim])
-	}
-	return out
-}
-
-func applyCausalMask(t tensorpkg.Tensor) error {
-	minf := math.Inf(-1)
-	tshape := t.Shape
-	rows, cols := tshape[0], tshape[1]
-
-	for i := 0; i < rows; i++ {
-		for j := 0; j < cols; j++ {
-			if j > i {
-				flatIdx, err := t.FlatIndex(i, j)
-				if err != nil {
-					return err
-				}
-				t.Values[flatIdx] = float32(minf)
-			}
-		}
-	}
-
-	return nil
-}
-
-// geluApprox(x) = 0.5 * x * (1 + tanh(sqrt(2 / pi) * (x + 0.044715 * x^3)))
-func geluApprox(x float32) float32 {
-	X := float64(x)
-	return 0.5 * x * (1 + float32(math.Tanh(float64(sqrtTwoOverPi)*(X+(float64(0.044715)*math.Pow(X, float64(3)))))))
 }
