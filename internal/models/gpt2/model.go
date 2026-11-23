@@ -1,4 +1,4 @@
-package main
+package gpt2
 
 import (
 	"encoding/json"
@@ -44,11 +44,11 @@ type TokenConfig struct {
 	Count int `json:"count"`
 }
 
-func loadConfig(path string) (GPT2Config, error) {
+func LoadConfig(path string) (GPT2Config, error) {
 	return readJSON[GPT2Config](path)
 }
 
-func loadInputRows(path string) (tensorpkg.Tensor, error) {
+func LoadInputRows(path string) (tensorpkg.Tensor, error) {
 	inputRows, err := readJSON[[][]float32](path)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
@@ -70,7 +70,7 @@ func loadInputRows(path string) (tensorpkg.Tensor, error) {
 	return inputTensor, nil
 }
 
-func loadTokenConfig(path string) (TokenConfig, error) {
+func LoadTokenConfig(path string) (TokenConfig, error) {
 	return readJSON[TokenConfig](path)
 }
 
@@ -113,7 +113,7 @@ func weightsForLayer(tmap map[string]tensorpkg.Tensor, layer int) layerWeights {
 	}
 }
 
-func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
+func CalculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	weights := weightsForLayer(tmap, layerNum)
 
 	/*
@@ -199,7 +199,7 @@ func calculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 	return res, nil
 }
 
-func calculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
+func CalculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	weights := weightsForLayer(tmap, layerNum)
 	layerNorm, err := (nn.LayerNorm{W: weights.ln1Weight, B: weights.ln1Bias, Eps: config.LayerNormEpsilon}).Forward(inputTensor)
 	if err != nil {
@@ -207,12 +207,12 @@ func calculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNu
 	}
 
 	// calculate attn on layernormed input
-	attn, err := calculateAttention(
+	attn, err := CalculateAttention(
 		tmap,
 		config,
 		layerNum,
-		layerNorm,
-	)
+		layerNorm)
+
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
@@ -230,7 +230,7 @@ func calculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNu
 	return resOutput, nil
 }
 
-func calculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
+func CalculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
 	attendedEmbeddings := tensorpkg.Tensor{
 		DType:  inputTensor.DType,
 		Shape:  inputTensor.Shape,
@@ -238,7 +238,7 @@ func calculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputT
 	}
 
 	for i := range config.NumberOfLayers {
-		a, err := calculateBlock(tmap, config, i, attendedEmbeddings)
+		a, err := CalculateBlock(tmap, config, i, attendedEmbeddings)
 		if err != nil {
 			return tensorpkg.Tensor{}, err
 		}
@@ -288,11 +288,11 @@ func calculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputT
 	return logits, nil
 }
 
-func performGeneration(tmap map[string]tensorpkg.Tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensorpkg.Tensor) ([]int, error) {
+func PerformGeneration(tmap map[string]tensorpkg.Tensor, config GPT2Config, tokenConfig TokenConfig, inputTensor tensorpkg.Tensor) ([]int, error) {
 
 	generatedIds := []int{}
 	for range tokenConfig.Count {
-		logits, err := calculateLogits(tmap, config, inputTensor)
+		logits, err := CalculateLogits(tmap, config, inputTensor)
 		if err != nil {
 			return []int{}, err
 		}

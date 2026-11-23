@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
 	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"math"
@@ -84,8 +85,9 @@ func attentionWeights(nEmbeddings int) map[string]tensorpkg.Tensor {
 
 func TestAttentionGolden(t *testing.T) {
 	weights := attentionWeights(1)
-	got, err := calculateAttention(weights, GPT2Config{NumberOfEmbeddings: 1, NumberOfHeads: 1}, 0,
+	got, err := gpt2.CalculateAttention(weights, gpt2.GPT2Config{NumberOfEmbeddings: 1, NumberOfHeads: 1}, 0,
 		tensorpkg.Tensor{DType: "F32", Shape: []int{2, 1}, Values: []float32{1, 2}})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +96,9 @@ func TestAttentionGolden(t *testing.T) {
 
 func TestTwoHeadAttentionGolden(t *testing.T) {
 	weights := attentionWeights(2)
-	got, err := calculateAttention(weights, GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 2}, 0,
+	got, err := gpt2.CalculateAttention(weights, gpt2.GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 2}, 0,
 		tensorpkg.Tensor{DType: "F32", Shape: []int{2, 2}, Values: []float32{1, 0, 0, 1}})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +122,9 @@ func TestBlockGolden(t *testing.T) {
 	}
 	weights["h.0.mlp.c_proj.bias"] = tensorpkg.Tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
 
-	got, err := calculateBlock(weights, GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 1, LayerNormEpsilon: 1e-5}, 0,
+	got, err := gpt2.CalculateBlock(weights, gpt2.GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 1, LayerNormEpsilon: 1e-5}, 0,
 		tensorpkg.Tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,22 +140,22 @@ func TestRealModelLogitsAndGenerate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config, err := loadConfig(filepath.Join(filepath.Dir(modelPath), "config.json"))
+	config, err := gpt2.LoadConfig(filepath.Join(filepath.Dir(modelPath), "config.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	input, err := embedTokenIds(weights, []int{464, 3139, 286, 4881, 318})
+	input, err := gpt2.EmbedTokenIDs(weights, []int{464, 3139, 286, 4881, 318})
 	if err != nil {
 		t.Fatal(err)
 	}
-	logits, err := calculateLogits(weights, config, input)
+	logits, err := gpt2.CalculateLogits(weights, config, input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(logits.Values) != config.VocabularySize {
 		t.Fatalf("logits length = %d, want %d", len(logits.Values), config.VocabularySize)
 	}
-	generated, err := performGeneration(weights, config, TokenConfig{Count: 1}, input)
+	generated, err := gpt2.PerformGeneration(weights, config, gpt2.TokenConfig{Count: 1}, input)
 	if err != nil {
 		t.Fatal(err)
 	}

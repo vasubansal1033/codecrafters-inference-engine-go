@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/safetensors"
 	"os"
 	"sort"
@@ -59,13 +60,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error reading tensors: %s\n", err)
 			os.Exit(1)
 		}
-		tokenIds, err := loadTokenIds(os.Args[3])
+		tokenIds, err := gpt2.LoadTokenIDs(os.Args[3])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading token ids: %s\n", err)
 			os.Exit(1)
 		}
 
-		mergedEmbeddings, err := embedTokenIds(tensors, tokenIds)
+		mergedEmbeddings, err := gpt2.EmbedTokenIDs(tensors, tokenIds)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
 			os.Exit(1)
@@ -93,7 +94,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := loadConfig(configPath)
+		config, err := gpt2.LoadConfig(configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
@@ -105,18 +106,18 @@ func main() {
 			os.Exit(1)
 		}
 
-		inputTensor, err := loadInputRows(inputsPath)
+		inputTensor, err := gpt2.LoadInputRows(inputsPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading inputs: %s\n", err)
 			os.Exit(1)
 		}
 
-		attn, err := calculateAttention(
+		attn, err := gpt2.CalculateAttention(
 			tensors,
 			config,
 			layerNum,
-			inputTensor,
-		)
+			inputTensor)
+
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while calculating attention: %s\n", err)
 			os.Exit(1)
@@ -145,7 +146,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := loadConfig(configPath)
+		config, err := gpt2.LoadConfig(configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
@@ -157,18 +158,18 @@ func main() {
 			os.Exit(1)
 		}
 
-		inputTensor, err := loadInputRows(inputsPath)
+		inputTensor, err := gpt2.LoadInputRows(inputsPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading inputs: %s\n", err)
 			os.Exit(1)
 		}
 
-		block, err := calculateBlock(
+		block, err := gpt2.CalculateBlock(
 			tensors,
 			config,
 			layerNum,
-			inputTensor,
-		)
+			inputTensor)
+
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while calculating block: %s\n", err)
 			os.Exit(1)
@@ -196,29 +197,29 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := loadConfig(configPath)
+		config, err := gpt2.LoadConfig(configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
 		}
 
-		tokenIds, err := loadTokenIds(idsPath)
+		tokenIds, err := gpt2.LoadTokenIDs(idsPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading ids: %s\n", err)
 			os.Exit(1)
 		}
 
-		inputTensor, err := embedTokenIds(tensors, tokenIds)
+		inputTensor, err := gpt2.EmbedTokenIDs(tensors, tokenIds)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
 			os.Exit(1)
 		}
 
-		logits, err := calculateLogits(
+		logits, err := gpt2.CalculateLogits(
 			tensors,
 			config,
-			inputTensor,
-		)
+			inputTensor)
+
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while calculating logits: %s\n", err)
 			os.Exit(1)
@@ -247,36 +248,35 @@ func main() {
 			os.Exit(1)
 		}
 
-		config, err := loadConfig(configPath)
+		config, err := gpt2.LoadConfig(configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading configs: %s\n", err)
 			os.Exit(1)
 		}
 
-		tokenIds, err := loadTokenIds(idsPath)
+		tokenIds, err := gpt2.LoadTokenIDs(idsPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading ids: %s\n", err)
 			os.Exit(1)
 		}
 
-		tokenConfig, err := loadTokenConfig(tokenConfigPath)
+		tokenConfig, err := gpt2.LoadTokenConfig(tokenConfigPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while loading token configs: %s\n", err)
 			os.Exit(1)
 		}
 
-		inputTensor, err := embedTokenIds(tensors, tokenIds)
+		inputTensor, err := gpt2.EmbedTokenIDs(tensors, tokenIds)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error embedding tokens: %s\n", err)
 			os.Exit(1)
 		}
 
-		generatedOutput, err := performGeneration(
+		generatedOutput, err := gpt2.PerformGeneration(
 			tensors,
 			config,
 			tokenConfig,
-			inputTensor,
-		)
+			inputTensor)
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error while performing generation: %s\n", err)

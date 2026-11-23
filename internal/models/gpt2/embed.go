@@ -1,4 +1,4 @@
-package main
+package gpt2
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 // embedTokens calculates the embedding and returns result as 2D array
 // (token embedding + position embedding of token in prompt)
 // tokenId[i] -> i position, tokenId[i] -> token id
-func embedTokenIds(tmap map[string]tensorpkg.Tensor, tokenIds []int) (tensorpkg.Tensor, error) {
+func EmbedTokenIDs(tmap map[string]tensorpkg.Tensor, tokenIds []int) (tensorpkg.Tensor, error) {
 	numTokenIds := len(tokenIds)
 	var embedding []float32
 	for pos := range numTokenIds {
@@ -122,6 +122,6 @@ func mergeTokenAndPosEmbeddings(tokenEmbedding []float32, posEmbedding []float32
 	return mergedEmbedding, nil
 }
 
-func loadTokenIds(path string) ([]int, error) {
+func LoadTokenIDs(path string) ([]int, error) {
 	return readJSON[[]int](path)
 }
