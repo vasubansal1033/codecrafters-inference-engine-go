@@ -9,6 +9,20 @@ import (
 	"os"
 )
 
+type dtypeDecoder struct {
+	width  int
+	decode func([]byte) float32
+}
+
+var dtypeDecoders = map[string]dtypeDecoder{
+	"F32": {width: 4, decode: func(raw []byte) float32 {
+		return math.Float32frombits(binary.LittleEndian.Uint32(raw))
+	}},
+	"I32": {width: 4, decode: func(raw []byte) float32 {
+		return float32(int32(binary.LittleEndian.Uint32(raw)))
+	}},
+}
+
 // loadTensors reads every tensor in a safetensors file, with all of its numbers.
 func loadTensors(path string) (map[string]tensor, error) {
 	f, err := os.Open(path)
@@ -43,18 +57,14 @@ func loadTensors(path string) (map[string]tensor, error) {
 		if name == "__metadata__" {
 			continue
 		}
+		decoder, ok := dtypeDecoders[info.DType]
+		if !ok {
+			return nil, fmt.Errorf("unsupported dtype %s", info.DType)
+		}
 		raw := data[info.DataOffsets[0]:info.DataOffsets[1]]
-		values := make([]float32, len(raw)/4)
+		values := make([]float32, len(raw)/decoder.width)
 		for i := range values {
-			bits := binary.LittleEndian.Uint32(raw[i*4:])
-			switch info.DType {
-			case "F32":
-				values[i] = math.Float32frombits(bits)
-			case "I32":
-				values[i] = float32(int32(bits))
-			default:
-				return nil, fmt.Errorf("unsupported dtype %s", info.DType)
-			}
+			values[i] = decoder.decode(raw[i*decoder.width:])
 		}
 		tensors[name] = tensor{DType: info.DType, Shape: info.Shape, Values: values}
 	}
