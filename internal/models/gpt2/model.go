@@ -99,7 +99,14 @@ func (m *Model) calculateAttention(layerNum int, inputTensor tensorpkg.Tensor, c
 		if err != nil {
 			return tensorpkg.Tensor{}, err
 		}
-		score, err = nn.CausalMask(score)
+
+		// handling prefill and decode phase Causal mask
+		/*
+			in precode phase -> V.Shape[0] = context_len + 1, score.Shape[0] = context_len + 1
+			so pastContextLen = 0
+		*/
+		pastContextLen := V.Shape[0] - score.Shape[0]
+		score, err = nn.CausalMask(score, pastContextLen)
 		if err != nil {
 			return tensorpkg.Tensor{}, err
 		}
@@ -248,6 +255,53 @@ func calculateScore(layerProjection tensorpkg.Tensor, cache *kvcache.KVCache, la
 		}
 	} else {
 		// decode phase
+		q = tensorpkg.Tensor{
+			DType:  layerProjection.DType,
+			Shape:  []int{1, headDim},
+			Values: make([]float32, 1*headDim),
+		}
+		klast := tensorpkg.Tensor{
+			DType:  layerProjection.DType,
+			Shape:  []int{1, headDim},
+			Values: make([]float32, numPositions*headDim),
+		}
+		vlast := tensorpkg.Tensor{
+			DType:  layerProjection.DType,
+			Shape:  []int{1, headDim},
+			Values: make([]float32, numPositions*headDim),
+		}
+
+		// decode phase so we are passing only the last token as context
+		// so layerProjection size is (1, 3 * n_embd)
+		// so first retrieve last token's k and v
+		stride := 3 * numEmbeddings
+		qBase := head * headDim
+		kBase := numEmbeddings + qBase
+		vBase := 2*numEmbeddings + qBase
+
+		row := layerProjection.Values[0:stride]
+		copy(q.Values[0:headDim], row[qBase:qBase+headDim])
+		copy(klast.Values[0:headDim], row[kBase:kBase+headDim])
+		copy(vlast.Values[0:headDim], row[vBase:vBase+headDim])
+
+		// concatenate the cached k and v with last token's k and v
+		k, err = kcached.Concat(klast)
+		if err != nil {
+			return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+		}
+
+		v, err = vcached.Concat(vlast)
+		if err != nil {
+			return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+		}
+
+		// update cache store
+		if cache != nil {
+			err := cache.Put(layerNum, head, klast, vlast)
+			if err != nil {
+				return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+			}
+		}
 	}
 
 	kT, err := k.Transpose()

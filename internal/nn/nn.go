@@ -54,11 +54,11 @@ func GELU(input tensor.Tensor) tensor.Tensor {
 	return output
 }
 
-func CausalMask(input tensor.Tensor) (tensor.Tensor, error) {
+func CausalMask(input tensor.Tensor, pastContextLen int) (tensor.Tensor, error) {
 	output := input
 	output.Values = slices.Clone(input.Values)
 	for i := 0; i < output.Shape[0]; i++ {
-		for j := i + 1; j < output.Shape[1]; j++ {
+		for j := pastContextLen + i + 1; j < output.Shape[1]; j++ {
 			index, err := output.FlatIndex(i, j)
 			if err != nil {
 				return tensor.Tensor{}, err

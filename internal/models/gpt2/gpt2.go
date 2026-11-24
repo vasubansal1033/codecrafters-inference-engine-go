@@ -92,7 +92,11 @@ func (m *Model) NumLayers() int {
 }
 
 func (m *Model) Embed(ids []int) (tensor.Tensor, error) {
-	return EmbedTokenIDs(m.weights, ids)
+	return embedTokenIDs(m.weights, ids, 0)
+}
+
+func (m *Model) EmbedAt(ids []int, position int) (tensor.Tensor, error) {
+	return embedTokenIDs(m.weights, ids, position)
 }
 
 // Attention is the attn stage. It recomputes the whole input and does not use the cache.

@@ -13,10 +13,15 @@ import (
 // (token embedding + position embedding of token in prompt)
 // tokenId[i] -> i position, tokenId[i] -> token id
 func EmbedTokenIDs(tmap map[string]tensorpkg.Tensor, tokenIds []int) (tensorpkg.Tensor, error) {
+	return embedTokenIDs(tmap, tokenIds, 0)
+}
+
+// embedTokenIDs adds the token row and the position row. start is the wpe index of tokenIds[0].
+func embedTokenIDs(tmap map[string]tensorpkg.Tensor, tokenIds []int, start int) (tensorpkg.Tensor, error) {
 	numTokenIds := len(tokenIds)
 	var embedding []float32
-	for pos := range numTokenIds {
-		tokenId := tokenIds[pos]
+	for i, tokenId := range tokenIds {
+		pos := start + i
 
 		tokenEmbedding, err := getEmbeddingFromTensorValues(tmap["wte.weight"], tokenId)
 		if err != nil {

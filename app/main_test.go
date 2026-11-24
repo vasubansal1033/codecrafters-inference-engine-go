@@ -65,6 +65,24 @@ func TestTensorOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeValues(t, normalized.Values, []float32{-0.99998, 0.99998}, 1e-5)
+
+	cached := tensorpkg.Tensor{DType: "F32", Shape: []int{2, 2}, Values: []float32{1, 2, 3, 4}}
+	row := tensorpkg.Tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{5, 6}}
+	joined, err := cached.Concat(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined.Shape[0] != 3 || joined.Shape[1] != 2 {
+		t.Fatalf("concat shape = %v", joined.Shape)
+	}
+	closeValues(t, joined.Values, []float32{1, 2, 3, 4, 5, 6}, 0)
+
+	empty := tensorpkg.Tensor{DType: "F32", Shape: []int{0, 0}}
+	joined, err = empty.Concat(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeValues(t, joined.Values, []float32{5, 6}, 0)
 }
 
 func attentionWeights(nEmbeddings int) map[string]tensorpkg.Tensor {

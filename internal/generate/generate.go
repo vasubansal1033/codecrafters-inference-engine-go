@@ -18,7 +18,7 @@ func Greedy(model models.Model, ids []int, count int) ([]int, error) {
 	context := slices.Clone(ids)
 	generated := make([]int, 0, count)
 	for range count {
-		input, err := model.Embed(context)
+		input, err := embedStep(model, context, len(generated))
 		if err != nil {
 			return nil, err
 		}
@@ -44,7 +44,7 @@ func TopP(model models.Model, ids []int, count int, temperature float32, topP fl
 	context := slices.Clone(ids)
 	generated := make([]int, 0, count)
 	for step := range count {
-		input, err := model.Embed(context)
+		input, err := embedStep(model, context, len(generated))
 		if err != nil {
 			return nil, err
 		}
@@ -67,6 +67,14 @@ func TopP(model models.Model, ids []int, count int, temperature float32, topP fl
 		context = append(context, topPSampledIdx)
 	}
 	return generated, nil
+}
+
+func embedStep(model models.Model, context []int, generated int) (tensor.Tensor, error) {
+	if generated == 0 {
+		return model.Embed(context)
+	}
+	position := len(context) - 1
+	return model.EmbedAt([]int{context[position]}, position)
 }
 
 type tokenProb struct {

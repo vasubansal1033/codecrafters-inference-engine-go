@@ -14,6 +14,7 @@ import (
 type Model interface {
 	NumLayers() int
 	Embed(ids []int) (tensor.Tensor, error)
+	EmbedAt(ids []int, position int) (tensor.Tensor, error)
 	Attention(layer int, input tensor.Tensor) (tensor.Tensor, error)
 	Block(layer int, input tensor.Tensor) (tensor.Tensor, error)
 	Head(last tensor.Tensor) (tensor.Tensor, error)
