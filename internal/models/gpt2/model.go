@@ -93,13 +93,9 @@ func (m *Model) calculateAttention(layerNum int, inputTensor tensorpkg.Tensor, c
 	*/
 	headOutputs := make([]tensorpkg.Tensor, 0, numHeads)
 
-	// Caller passes this cache. Read and append this layer's K and V in the loop below.
-	_ = cache
-	// implement the KV Cache usage
-
 	// attention for hth head
 	for h := 0; h < numHeads; h++ {
-		score, V, err := calculateScore(layerProjection, numPositions, numEmbeddings, numHeads, h)
+		score, V, err := calculateScore(layerProjection, cache, layerNum, numPositions, numEmbeddings, numHeads, h)
 		if err != nil {
 			return tensorpkg.Tensor{}, err
 		}
@@ -163,7 +159,7 @@ func (m *Model) calculateBlock(layerNum int, inputTensor tensorpkg.Tensor, cache
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
 // In MHA performs calculation for Qh, Kh, Vh
-func calculateScore(layerProjection tensorpkg.Tensor, numPositions int, numEmbeddings int, numHeads int, head int) (tensorpkg.Tensor, tensorpkg.Tensor, error) {
+func calculateScore(layerProjection tensorpkg.Tensor, cache *kvcache.KVCache, layerNum int, numPositions int, numEmbeddings int, numHeads int, head int) (tensorpkg.Tensor, tensorpkg.Tensor, error) {
 	tshape := layerProjection.Shape
 	if len(tshape) != 2 || numPositions < 0 || numEmbeddings <= 0 || numHeads <= 0 || head < 0 || head >= numHeads || numEmbeddings%numHeads != 0 || tshape[0] != numPositions || tshape[1] != 3*numEmbeddings || len(layerProjection.Values) < numPositions*3*numEmbeddings {
 		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, numPositions, numEmbeddings, numHeads)
@@ -171,23 +167,6 @@ func calculateScore(layerProjection tensorpkg.Tensor, numPositions int, numEmbed
 
 	// Fused row is [Q | K | V], and each block is [head 0 | head 1 | ...].
 	// Copy only this head's columns. Shape is [n_pos, head_dim].
-	headDim := numEmbeddings / numHeads
-	q := tensorpkg.Tensor{
-		DType:  layerProjection.DType,
-		Shape:  []int{numPositions, headDim},
-		Values: make([]float32, numPositions*headDim),
-	}
-	k := tensorpkg.Tensor{
-		DType:  layerProjection.DType,
-		Shape:  []int{numPositions, headDim},
-		Values: make([]float32, numPositions*headDim),
-	}
-	v := tensorpkg.Tensor{
-		DType:  layerProjection.DType,
-		Shape:  []int{numPositions, headDim},
-		Values: make([]float32, numPositions*headDim),
-	}
-
 	/*
 		KV Cache implementation
 
@@ -206,15 +185,69 @@ func calculateScore(layerProjection tensorpkg.Tensor, numPositions int, numEmbed
 		i-1 tokens.
 
 	*/
-	stride := 3 * numEmbeddings
-	qBase := head * headDim
-	kBase := numEmbeddings + qBase
-	vBase := 2*numEmbeddings + qBase
-	for i := 0; i < numPositions; i++ {
-		row := layerProjection.Values[i*stride : (i+1)*stride]
-		copy(q.Values[i*headDim:(i+1)*headDim], row[qBase:qBase+headDim])
-		copy(k.Values[i*headDim:(i+1)*headDim], row[kBase:kBase+headDim])
-		copy(v.Values[i*headDim:(i+1)*headDim], row[vBase:vBase+headDim])
+
+	headDim := numEmbeddings / numHeads
+	var kcached, vcached tensorpkg.Tensor
+
+	var err error
+	if cache == nil {
+		// treating no cache case as prefill phase
+		kcached = tensorpkg.Tensor{
+			DType:  "F32",
+			Shape:  []int{0, 0},
+			Values: []float32{},
+		}
+		vcached = tensorpkg.Tensor{
+			DType:  "F32",
+			Shape:  []int{0, 0},
+			Values: []float32{},
+		}
+	} else {
+		kcached, vcached, err = cache.Get(layerNum, head)
+		if err != nil {
+			return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+		}
+	}
+
+	var q, k, v tensorpkg.Tensor
+	if kcached.IsEmpty() && vcached.IsEmpty() {
+		// prefill phase
+		q = tensorpkg.Tensor{
+			DType:  layerProjection.DType,
+			Shape:  []int{numPositions, headDim},
+			Values: make([]float32, numPositions*headDim),
+		}
+		k = tensorpkg.Tensor{
+			DType:  layerProjection.DType,
+			Shape:  []int{numPositions, headDim},
+			Values: make([]float32, numPositions*headDim),
+		}
+		v = tensorpkg.Tensor{
+			DType:  layerProjection.DType,
+			Shape:  []int{numPositions, headDim},
+			Values: make([]float32, numPositions*headDim),
+		}
+
+		stride := 3 * numEmbeddings
+		qBase := head * headDim
+		kBase := numEmbeddings + qBase
+		vBase := 2*numEmbeddings + qBase
+		for i := 0; i < numPositions; i++ {
+			row := layerProjection.Values[i*stride : (i+1)*stride]
+			copy(q.Values[i*headDim:(i+1)*headDim], row[qBase:qBase+headDim])
+			copy(k.Values[i*headDim:(i+1)*headDim], row[kBase:kBase+headDim])
+			copy(v.Values[i*headDim:(i+1)*headDim], row[vBase:vBase+headDim])
+		}
+
+		// prefill cache store
+		if cache != nil {
+			err := cache.Put(layerNum, head, k, v)
+			if err != nil {
+				return tensorpkg.Tensor{}, tensorpkg.Tensor{}, err
+			}
+		}
+	} else {
+		// decode phase
 	}
 
 	kT, err := k.Transpose()

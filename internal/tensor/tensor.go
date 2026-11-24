@@ -13,6 +13,10 @@ type Tensor struct {
 	Values []float32
 }
 
+func (t1 Tensor) IsEmpty() bool {
+	return len(t1.Values) == 0
+}
+
 // TODO[improvement]: current implementations work only for 2D tensors
 func (t1 Tensor) Add(t2 Tensor) (Tensor, error) {
 	return t1.broadcastBinary(t2, func(a, b float32) float32 { return a + b }, "Addition", "+")
