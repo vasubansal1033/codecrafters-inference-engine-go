@@ -1,4 +1,4 @@
-These notes follow the stages: the weight file, embeddings, one attention head, many heads, layer norm, and the full block. The examples are small enough to finish on paper. Bytes live in `internal/safetensors`, arithmetic in `internal/tensor`, layers in `internal/nn`, and the GPT-2 forward pass in `internal/models/gpt2`.
+These notes follow the stages: the weight file, embeddings, one attention head, many heads, layer norm, and the full block. The examples are small enough to finish on paper. Bytes live in `internal/safetensors`, arithmetic in `internal/tensor`, layers in `internal/nn`, and the GPT-2 model in `internal/models/gpt2`. Generation lives in `internal/generate`, and the keys and values for a generation live in `internal/models/kv_cache`. The command list and the memory notes are in the repository README.
 
 ## The file of weights
 

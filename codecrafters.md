@@ -6,7 +6,7 @@ The program loads GPT-2's weights and writes the next token IDs. Along the way i
 
 ## Passing the first stage
 
-The entry point is `app/main.go`. Study and uncomment the relevant code, then run:
+The entry point is `app/main.go`. It calls `cli.Run`, and the commands are the ones listed under Running commands in the repository README. Submit with:
 
 ```sh
 codecrafters submit
@@ -15,7 +15,7 @@ codecrafters submit
 ## Stage 2 and beyond
 
 1. Install `go (1.26)` locally.
-2. Run `./your_program.sh`. The engine lives in `app/main.go`.
+2. Run `./your_program.sh` with one of the commands under Running commands in the repository README.
 3. Run `codecrafters submit`. Test output streams to the terminal.
 
 ## Testing locally
