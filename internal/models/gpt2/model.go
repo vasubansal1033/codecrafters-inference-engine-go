@@ -316,6 +316,9 @@ func calculateScore(layerProjection tensorpkg.Tensor, numPositions int, numEmbed
 	/*
 		KV Cache implementation
 
+		Prefill phase:
+			While generating the first token, the token cache will be empty. So we need to "prefill" it with context
+			K and V.
 		Decode phase:
 			Using KVCache and layer_num as key, retrieve K and V of all previous tokens inform of tensor
 			K, V -> (num_positions-1, num_embeddings)

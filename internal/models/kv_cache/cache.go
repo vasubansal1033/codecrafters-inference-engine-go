@@ -7,14 +7,14 @@ import (
 )
 
 type KVCache struct {
-	// map of layer_num to a list of tensors
-	Cache map[int][]tensor.Tensor
+	// list of tensors indexed by layer_num, head
+	Cache map[int]map[int][]tensor.Tensor
 }
 
-func (kv *KVCache) Get(layer_num int) (tensor.Tensor, error) {
+func (kv *KVCache) Get(layer_num int, head int) (tensor.Tensor, error) {
 	return tensor.Tensor{}, fmt.Errorf("KVCache.Get not implemented yet")
 }
 
-func (kv *KVCache) Put(layer_num int) (tensor.Tensor, error) {
+func (kv *KVCache) Put(layer_num int, head int, t tensor.Tensor) (tensor.Tensor, error) {
 	return tensor.Tensor{}, fmt.Errorf("KVCache.Put not implemented yet")
 }
