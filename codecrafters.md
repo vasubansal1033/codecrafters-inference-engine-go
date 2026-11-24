@@ -1,12 +1,18 @@
 This is a starting point for Go solutions to the ["Build Your Own Inference Engine" Challenge](https://codecrafters.io/challenges/inference-engine).
 
-The program loads GPT-2's weights and writes the next token IDs. Along the way it covers attention and the transformer.
+The program loads GPT-2 weights and writes the next token ids.
 
 **Note:** On GitHub, go to [codecrafters.io](https://codecrafters.io) to try the challenge.
 
+| Notes | File |
+| --- | --- |
+| Commands, package layout, memory | `README.md` |
+| Stage arithmetic | `concepts.md` |
+| Prefill, decode, causal mask | `kv-cache.md` |
+
 ## Passing the first stage
 
-The entry point is `app/main.go`. It calls `cli.Run`, and the commands are the ones listed under Running commands in the repository README. Submit with:
+The entry point is `app/main.go`. It calls `cli.Run`. The commands are listed under Running commands in `README.md`.
 
 ```sh
 codecrafters submit
@@ -15,7 +21,7 @@ codecrafters submit
 ## Stage 2 and beyond
 
 1. Install `go (1.26)` locally.
-2. Run `./your_program.sh` with one of the commands under Running commands in the repository README.
+2. Run `./your_program.sh` with one of the commands under Running commands in `README.md`.
 3. Run `codecrafters submit`. Test output streams to the terminal.
 
 ## Testing locally
@@ -38,7 +44,7 @@ myengine inspect model.safetensors
 
 ## Running GPT-2
 
-The last stage runs the engine on GPT-2's real weights. Download them into a testing folder outside this repository, so the 548 MB file stays out of git:
+The last stage runs the real GPT-2 weights on "The capital of France is". Download the weights into a testing folder outside this repository, so the 548 MB file stays out of git:
 
 ```sh
 mkdir -p /tmp/testing && cd /tmp/testing
