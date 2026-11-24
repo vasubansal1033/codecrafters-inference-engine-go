@@ -11,6 +11,10 @@ import (
 )
 
 func Greedy(model models.Model, ids []int, count int) ([]int, error) {
+	cache, err := model.GetKVCache()
+	if err != nil {
+		return nil, err
+	}
 	context := slices.Clone(ids)
 	generated := make([]int, 0, count)
 	for range count {
@@ -18,7 +22,7 @@ func Greedy(model models.Model, ids []int, count int) ([]int, error) {
 		if err != nil {
 			return nil, err
 		}
-		logits, err := models.Logits(model, input)
+		logits, err := model.Forward(input, cache)
 		if err != nil {
 			return nil, err
 		}
@@ -33,6 +37,10 @@ func TopP(model models.Model, ids []int, count int, temperature float32, topP fl
 	if len(random) != count {
 		return nil, fmt.Errorf("top-p sampling: expected %d random numbers, got %d", count, len(random))
 	}
+	cache, err := model.GetKVCache()
+	if err != nil {
+		return nil, err
+	}
 	context := slices.Clone(ids)
 	generated := make([]int, 0, count)
 	for step := range count {
@@ -40,7 +48,7 @@ func TopP(model models.Model, ids []int, count int, temperature float32, topP fl
 		if err != nil {
 			return nil, err
 		}
-		logits, err := models.Logits(model, input)
+		logits, err := model.Forward(input, cache)
 		if err != nil {
 			return nil, err
 		}

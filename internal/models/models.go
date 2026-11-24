@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
+	kvcache "github.com/codecrafters-io/inference-engine-starter-go/internal/models/kv_cache"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 )
 
@@ -16,11 +17,13 @@ type Model interface {
 	Attention(layer int, input tensor.Tensor) (tensor.Tensor, error)
 	Block(layer int, input tensor.Tensor) (tensor.Tensor, error)
 	Head(last tensor.Tensor) (tensor.Tensor, error)
+	Forward(input tensor.Tensor, cache *kvcache.KVCache) (tensor.Tensor, error)
+	GetKVCache() (*kvcache.KVCache, error)
 }
 
-type Builder func(config []byte, weights map[string]tensor.Tensor) (Model, error)
+type ModelBuilder func(config []byte, weights map[string]tensor.Tensor) (Model, error)
 
-var builders = map[string]Builder{
+var modelBuilder = map[string]ModelBuilder{
 	"gpt2": func(config []byte, weights map[string]tensor.Tensor) (Model, error) {
 		return gpt2.New(config, weights)
 	},
@@ -40,31 +43,13 @@ func Load(configPath string, weights map[string]tensor.Tensor) (Model, error) {
 	if metadata.ModelType == "" {
 		metadata.ModelType = "gpt2"
 	}
-	builder, ok := builders[metadata.ModelType]
+	model, ok := modelBuilder[metadata.ModelType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported model_type %q", metadata.ModelType)
 	}
-	return builder(config, weights)
+	return model(config, weights)
 }
 
 func Logits(model Model, input tensor.Tensor) (tensor.Tensor, error) {
-	current := input
-	for layer := range model.NumLayers() {
-		next, err := model.Block(layer, current)
-		if err != nil {
-			return tensor.Tensor{}, err
-		}
-		current = next
-	}
-	if len(current.Shape) != 2 || current.Shape[0] == 0 {
-		return tensor.Tensor{}, fmt.Errorf("invalid final hidden state shape %v", current.Shape)
-	}
-	width := current.Shape[1]
-	start := (current.Shape[0] - 1) * width
-	last := tensor.Tensor{
-		DType:  current.DType,
-		Shape:  []int{1, width},
-		Values: current.Values[start : start+width],
-	}
-	return model.Head(last)
+	return model.Forward(input, nil)
 }

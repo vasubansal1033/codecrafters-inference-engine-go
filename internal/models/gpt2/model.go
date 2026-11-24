@@ -1,81 +1,15 @@
 package gpt2
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
-	"os"
-	"slices"
 
+	kvcache "github.com/codecrafters-io/inference-engine-starter-go/internal/models/kv_cache"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/nn"
 	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 )
 
-/*
-attention
-*/
-
-// ref: https://huggingface.co/openai-community/gpt2/blob/main/config.json
-type GPT2Config struct {
-	ActivationFunction     string                 `json:"activation_function"`
-	Architectures          []string               `json:"architectures"`
-	AttentionPDrop         float32                `json:"attn_pdrop"`
-	BoSTokenId             int                    `json:"bos_token_id"`
-	EmbeddingPDrop         float32                `json:"embd_pdrop"`
-	EoSTokenId             int                    `json:"eos_token_id"`
-	InitializerRange       float32                `json:"initializer_range"`
-	LayerNormEpsilon       float32                `json:"layer_norm_epsilon"`
-	ModelType              string                 `json:"model_type"`
-	ContextWindowSize      int                    `json:"n_ctx"`
-	NumberOfEmbeddings     int                    `json:"n_embd"`
-	NumberOfHeads          int                    `json:"n_head"`
-	NumberOfLayers         int                    `json:"n_layer"`
-	NumberOfPositions      int                    `json:"n_positions"`
-	ResidualPDrop          float32                `json:"resid_pdrop"`
-	SummaryActivation      interface{}            `json:"summary_activation"`
-	SummaryFirstDropout    float32                `json:"summary_first_dropout"`
-	SummaryProjectToLabels bool                   `json:"summary_proj_to_labels"`
-	SummaryType            string                 `json:"summary_type"`
-	SummaryUseProj         bool                   `json:"summary_use_proj"`
-	TaskSpecificParams     map[string]interface{} `json:"task_specific_params"`
-	VocabularySize         int                    `json:"vocab_size"`
-}
-
-func LoadConfig(path string) (GPT2Config, error) {
-	return readJSON[GPT2Config](path)
-}
-
-func LoadInputRows(path string) (tensorpkg.Tensor, error) {
-	inputRows, err := readJSON[[][]float32](path)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-
-	// convert to tensor output
-	// [num_pos, n_embd]
-	tensorShape := []int{len(inputRows), len(inputRows[0])}
-	inputTensor := tensorpkg.Tensor{
-		DType:  "F32",
-		Shape:  tensorShape,
-		Values: []float32{},
-	}
-
-	for i := range len(inputRows) {
-		inputTensor.Values = append(inputTensor.Values, inputRows[i][:]...)
-	}
-
-	return inputTensor, nil
-}
-
-func readJSON[T any](path string) (T, error) {
-	var value T
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return value, err
-	}
-	err = json.Unmarshal(data, &value)
-	return value, err
-}
+// One transformer layer. gpt2.go decides whether a call receives the KV cache.
 
 type layerWeights struct {
 	attnWeight, attnBias tensorpkg.Tensor
@@ -106,8 +40,8 @@ func weightsForLayer(tmap map[string]tensorpkg.Tensor, layer int) layerWeights {
 	}
 }
 
-func CalculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
-	weights := weightsForLayer(tmap, layerNum)
+func (m *Model) calculateAttention(layerNum int, inputTensor tensorpkg.Tensor, cache *kvcache.KVCache) (tensorpkg.Tensor, error) {
+	weights := weightsForLayer(m.weights, layerNum)
 
 	/*
 		TENSOR CALCULATION:
@@ -142,8 +76,8 @@ func CalculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 	}
 
 	numPositions := inputTensor.Shape[0]
-	numEmbeddings := config.NumberOfEmbeddings
-	numHeads := config.NumberOfHeads
+	numEmbeddings := m.config.NumberOfEmbeddings
+	numHeads := m.config.NumberOfHeads
 	if numHeads <= 0 || numEmbeddings%numHeads != 0 {
 		return tensorpkg.Tensor{}, fmt.Errorf("Error while calculating score: invalid dims n_embd: %d and n_heads: %d", numEmbeddings, numHeads)
 	}
@@ -158,6 +92,10 @@ func CalculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 			Q = [Q1 | Q2 .... | Qn_heads]
 	*/
 	headOutputs := make([]tensorpkg.Tensor, 0, numHeads)
+
+	// Caller passes this cache. Read and append this layer's K and V in the loop below.
+	_ = cache
+	// implement the KV Cache usage
 
 	// attention for hth head
 	for h := 0; h < numHeads; h++ {
@@ -196,20 +134,15 @@ func CalculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 	return res, nil
 }
 
-func CalculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
-	weights := weightsForLayer(tmap, layerNum)
-	layerNorm, err := (nn.LayerNorm{W: weights.ln1Weight, B: weights.ln1Bias, Eps: config.LayerNormEpsilon}).Forward(inputTensor)
+func (m *Model) calculateBlock(layerNum int, inputTensor tensorpkg.Tensor, cache *kvcache.KVCache) (tensorpkg.Tensor, error) {
+	weights := weightsForLayer(m.weights, layerNum)
+	layerNorm, err := (nn.LayerNorm{W: weights.ln1Weight, B: weights.ln1Bias, Eps: m.config.LayerNormEpsilon}).Forward(inputTensor)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
 
 	// calculate attn on layernormed input
-	attn, err := CalculateAttention(
-		tmap,
-		config,
-		layerNum,
-		layerNorm,
-	)
+	attn, err := m.calculateAttention(layerNum, layerNorm, cache)
 
 	if err != nil {
 		return tensorpkg.Tensor{}, err
@@ -220,70 +153,12 @@ func CalculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNu
 		return tensorpkg.Tensor{}, err
 	}
 
-	resOutput, err = performMLP(tmap, config, layerNum, resOutput)
+	resOutput, err = m.performMLP(layerNum, resOutput)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
 
 	return resOutput, nil
-}
-
-func CalculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
-	attendedEmbeddings := tensorpkg.Tensor{
-		DType:  inputTensor.DType,
-		Shape:  inputTensor.Shape,
-		Values: slices.Clone(inputTensor.Values),
-	}
-
-	for i := range config.NumberOfLayers {
-		a, err := CalculateBlock(tmap, config, i, attendedEmbeddings)
-		if err != nil {
-			return tensorpkg.Tensor{}, err
-		}
-
-		attendedEmbeddings = a
-	}
-
-	embdLength := inputTensor.Shape[1]
-	lastAttendedEmbeddingStart := len(inputTensor.Values) - embdLength
-	lastAttendedEmbedding := tensorpkg.Tensor{
-		DType:  attendedEmbeddings.DType,
-		Shape:  []int{1, embdLength},
-		Values: attendedEmbeddings.Values[lastAttendedEmbeddingStart:],
-	}
-
-	// apply last layer's layer norm
-	layerNormWeights := tmap["ln_f.weight"]
-	layerNormBias := tmap["ln_f.bias"]
-
-	lastAttendedEmbedding, err := (nn.LayerNorm{W: layerNormWeights, B: layerNormBias, Eps: config.LayerNormEpsilon}).Forward(lastAttendedEmbedding)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-
-	/*
-		for each token t:
-		    logit[t] = dot(last, row t of wte.weight)
-
-		last -> (1, n_embd)
-		wte.weight -> (num_pos, n_embd)
-
-		dot prod. logits = last x (wte.weight).Tranpose
-		(1, num_pos)
-	*/
-
-	wteWeight := tmap["wte.weight"]
-	wteWeight, err = wteWeight.Transpose()
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-
-	logits, err := lastAttendedEmbedding.MatMul(wteWeight)
-	if err != nil {
-		return tensorpkg.Tensor{}, err
-	}
-
-	return logits, nil
 }
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
@@ -356,9 +231,9 @@ func calculateScore(layerProjection tensorpkg.Tensor, numPositions int, numEmbed
 	return res, v, err
 }
 
-func performMLP(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
-	weights := weightsForLayer(tmap, layerNum)
-	layerNormOutput, err := (nn.LayerNorm{W: weights.ln2Weight, B: weights.ln2Bias, Eps: config.LayerNormEpsilon}).Forward(inputTensor)
+func (m *Model) performMLP(layerNum int, inputTensor tensorpkg.Tensor) (tensorpkg.Tensor, error) {
+	weights := weightsForLayer(m.weights, layerNum)
+	layerNormOutput, err := (nn.LayerNorm{W: weights.ln2Weight, B: weights.ln2Bias, Eps: m.config.LayerNormEpsilon}).Forward(inputTensor)
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}

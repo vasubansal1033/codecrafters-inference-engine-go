@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/generate"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models"
 	"github.com/codecrafters-io/inference-engine-starter-go/internal/models/gpt2"
@@ -85,10 +86,19 @@ func attentionWeights(nEmbeddings int) map[string]tensorpkg.Tensor {
 	}
 }
 
+func newTestModel(t *testing.T, nEmbeddings, nHeads int, weights map[string]tensorpkg.Tensor) *gpt2.Model {
+	t.Helper()
+	config := fmt.Sprintf(`{"n_embd":%d,"n_head":%d,"n_layer":1,"layer_norm_epsilon":1e-5}`, nEmbeddings, nHeads)
+	model, err := gpt2.New([]byte(config), weights)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return model
+}
+
 func TestAttentionGolden(t *testing.T) {
-	weights := attentionWeights(1)
-	got, err := gpt2.CalculateAttention(weights, gpt2.GPT2Config{NumberOfEmbeddings: 1, NumberOfHeads: 1}, 0,
-		tensorpkg.Tensor{DType: "F32", Shape: []int{2, 1}, Values: []float32{1, 2}})
+	model := newTestModel(t, 1, 1, attentionWeights(1))
+	got, err := model.Attention(0, tensorpkg.Tensor{DType: "F32", Shape: []int{2, 1}, Values: []float32{1, 2}})
 
 	if err != nil {
 		t.Fatal(err)
@@ -97,9 +107,8 @@ func TestAttentionGolden(t *testing.T) {
 }
 
 func TestTwoHeadAttentionGolden(t *testing.T) {
-	weights := attentionWeights(2)
-	got, err := gpt2.CalculateAttention(weights, gpt2.GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 2}, 0,
-		tensorpkg.Tensor{DType: "F32", Shape: []int{2, 2}, Values: []float32{1, 0, 0, 1}})
+	model := newTestModel(t, 2, 2, attentionWeights(2))
+	got, err := model.Attention(0, tensorpkg.Tensor{DType: "F32", Shape: []int{2, 2}, Values: []float32{1, 0, 0, 1}})
 
 	if err != nil {
 		t.Fatal(err)
@@ -124,8 +133,8 @@ func TestBlockGolden(t *testing.T) {
 	}
 	weights["h.0.mlp.c_proj.bias"] = tensorpkg.Tensor{DType: "F32", Shape: []int{2}, Values: []float32{0, 0}}
 
-	got, err := gpt2.CalculateBlock(weights, gpt2.GPT2Config{NumberOfEmbeddings: 2, NumberOfHeads: 1, LayerNormEpsilon: 1e-5}, 0,
-		tensorpkg.Tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}})
+	model := newTestModel(t, 2, 1, weights)
+	got, err := model.Block(0, tensorpkg.Tensor{DType: "F32", Shape: []int{1, 2}, Values: []float32{1, 2}})
 
 	if err != nil {
 		t.Fatal(err)
