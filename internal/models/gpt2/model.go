@@ -3,11 +3,12 @@ package gpt2
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/codecrafters-io/inference-engine-starter-go/internal/nn"
-	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 	"math"
 	"os"
 	"slices"
+
+	"github.com/codecrafters-io/inference-engine-starter-go/internal/nn"
+	tensorpkg "github.com/codecrafters-io/inference-engine-starter-go/internal/tensor"
 )
 
 /*
@@ -131,7 +132,11 @@ func CalculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 			= (num_pos, n_embd)
 	*/
 
-	add, err := (nn.Linear{W: weights.attnWeight, B: &weights.attnBias}).Forward(inputTensor)
+	layerProjection, err := (nn.Linear{
+		W: weights.attnWeight,
+		B: &weights.attnBias,
+	}).Forward(inputTensor)
+
 	if err != nil {
 		return tensorpkg.Tensor{}, err
 	}
@@ -156,7 +161,7 @@ func CalculateAttention(tmap map[string]tensorpkg.Tensor, config GPT2Config, lay
 
 	// attention for hth head
 	for h := 0; h < numHeads; h++ {
-		score, V, err := calculateScore(add, numPositions, numEmbeddings, numHeads, h)
+		score, V, err := calculateScore(layerProjection, numPositions, numEmbeddings, numHeads, h)
 		if err != nil {
 			return tensorpkg.Tensor{}, err
 		}
@@ -203,7 +208,8 @@ func CalculateBlock(tmap map[string]tensorpkg.Tensor, config GPT2Config, layerNu
 		tmap,
 		config,
 		layerNum,
-		layerNorm)
+		layerNorm,
+	)
 
 	if err != nil {
 		return tensorpkg.Tensor{}, err
@@ -282,9 +288,9 @@ func CalculateLogits(tmap map[string]tensorpkg.Tensor, config GPT2Config, inputT
 
 // split [Q | K | V] and returns Q K^T / sqrt(d_k) and V
 // In MHA performs calculation for Qh, Kh, Vh
-func calculateScore(t tensorpkg.Tensor, numPositions int, numEmbeddings int, numHeads int, head int) (tensorpkg.Tensor, tensorpkg.Tensor, error) {
-	tshape := t.Shape
-	if len(tshape) != 2 || numPositions < 0 || numEmbeddings <= 0 || numHeads <= 0 || head < 0 || head >= numHeads || numEmbeddings%numHeads != 0 || tshape[0] != numPositions || tshape[1] != 3*numEmbeddings || len(t.Values) < numPositions*3*numEmbeddings {
+func calculateScore(layerProjection tensorpkg.Tensor, numPositions int, numEmbeddings int, numHeads int, head int) (tensorpkg.Tensor, tensorpkg.Tensor, error) {
+	tshape := layerProjection.Shape
+	if len(tshape) != 2 || numPositions < 0 || numEmbeddings <= 0 || numHeads <= 0 || head < 0 || head >= numHeads || numEmbeddings%numHeads != 0 || tshape[0] != numPositions || tshape[1] != 3*numEmbeddings || len(layerProjection.Values) < numPositions*3*numEmbeddings {
 		return tensorpkg.Tensor{}, tensorpkg.Tensor{}, fmt.Errorf("Error while calculating score: invalid dims provided: %v, whereas n_pos: %d, n_embd: %d and n_heads: %d", tshape, numPositions, numEmbeddings, numHeads)
 	}
 
@@ -292,27 +298,42 @@ func calculateScore(t tensorpkg.Tensor, numPositions int, numEmbeddings int, num
 	// Copy only this head's columns. Shape is [n_pos, head_dim].
 	headDim := numEmbeddings / numHeads
 	q := tensorpkg.Tensor{
-		DType:  t.DType,
+		DType:  layerProjection.DType,
 		Shape:  []int{numPositions, headDim},
 		Values: make([]float32, numPositions*headDim),
 	}
 	k := tensorpkg.Tensor{
-		DType:  t.DType,
+		DType:  layerProjection.DType,
 		Shape:  []int{numPositions, headDim},
 		Values: make([]float32, numPositions*headDim),
 	}
 	v := tensorpkg.Tensor{
-		DType:  t.DType,
+		DType:  layerProjection.DType,
 		Shape:  []int{numPositions, headDim},
 		Values: make([]float32, numPositions*headDim),
 	}
 
+	/*
+		KV Cache implementation
+
+		Decode phase:
+			Using KVCache and layer_num as key, retrieve K and V of all previous tokens inform of tensor
+			K, V -> (num_positions-1, num_embeddings)
+
+		And from current layer's projection tensor, we can retrieve K and V for current token.
+		We can reconstruct full K tensor -> (num_positions, num_embeddings)
+		And using current token's q (1, num_embeddings) get  -> (1, num_embeddings) the attention
+		for current token.
+		Otherwise, in basic implementation we are anyways throwing away the attention for the previous
+		i-1 tokens.
+
+	*/
 	stride := 3 * numEmbeddings
 	qBase := head * headDim
 	kBase := numEmbeddings + qBase
 	vBase := 2*numEmbeddings + qBase
 	for i := 0; i < numPositions; i++ {
-		row := t.Values[i*stride : (i+1)*stride]
+		row := layerProjection.Values[i*stride : (i+1)*stride]
 		copy(q.Values[i*headDim:(i+1)*headDim], row[qBase:qBase+headDim])
 		copy(k.Values[i*headDim:(i+1)*headDim], row[kBase:kBase+headDim])
 		copy(v.Values[i*headDim:(i+1)*headDim], row[vBase:vBase+headDim])
