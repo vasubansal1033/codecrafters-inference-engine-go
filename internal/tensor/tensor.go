@@ -284,6 +284,39 @@ func (t Tensor) LayerNorm(dim int, eps float32) (Tensor, error) {
 
 }
 
+func (t1 Tensor) Concat(t2 Tensor) (Tensor, error) {
+	if len(t1.Shape) != 2 || len(t2.Shape) != 2 {
+		return Tensor{}, fmt.Errorf("Concat error: invalid shapes %v and %v", t1.Shape, t2.Shape)
+	}
+	if t1.Shape[0] == 0 {
+		return cloneTensor(t2), nil
+	}
+	if t2.Shape[0] == 0 {
+		return cloneTensor(t1), nil
+	}
+	if t1.Shape[1] != t2.Shape[1] || len(t1.Values) != t1.Shape[0]*t1.Shape[1] || len(t2.Values) != t2.Shape[0]*t2.Shape[1] {
+		return Tensor{}, fmt.Errorf("Concat error: invalid shapes %v and %v", t1.Shape, t2.Shape)
+	}
+
+	values := make([]float32, len(t1.Values)+len(t2.Values))
+	copy(values, t1.Values)
+	copy(values[len(t1.Values):], t2.Values)
+	dtype := t1.DType
+	if dtype == "" {
+		dtype = t2.DType
+	}
+
+	return Tensor{
+		DType:  dtype,
+		Shape:  []int{t1.Shape[0] + t2.Shape[0], t1.Shape[1]},
+		Values: values,
+	}, nil
+}
+
+func cloneTensor(t Tensor) Tensor {
+	return Tensor{DType: t.DType, Shape: slices.Clone(t.Shape), Values: slices.Clone(t.Values)}
+}
+
 func (t *Tensor) FlatIndex(i int, j int) (int, error) {
 	/*
 		2, 3
