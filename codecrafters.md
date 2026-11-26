@@ -6,7 +6,9 @@ The program loads GPT-2 weights and writes the next token ids.
 
 | Notes | File |
 | --- | --- |
-| Commands, package layout, memory | `README.md` |
+| Overview, lessons learned, commands, package layout | `README.md` |
+| Memory and CPU measurements | `performance.md` |
+| Other models | `extensions.md` |
 | Stage arithmetic | `concepts.md` |
 | Prefill, decode, causal mask | `kv-cache.md` |
 
